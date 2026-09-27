@@ -1,5 +1,8 @@
 import { chromium } from "playwright";
 import fs from "node:fs/promises";
+const baseURL = (
+  process.env.PACE_QA_BASE_URL || "http://127.0.0.1:5173/"
+).replace(/\/$/, "");
 await fs.mkdir("test-results", { recursive: true });
 import assert from "node:assert/strict";
 const browser = await chromium.launch({
@@ -22,10 +25,10 @@ page.on("console", (m) => {
   if (m.type() === "error") errors.push(m.text());
 });
 await fs.mkdir("test-results", { recursive: true });
-await page.goto("http://127.0.0.1:5173/");
+await page.goto(baseURL + "/");
 await page.getByRole("button", { name: "設定をあとで行う" }).click();
 const go = async (path) => {
-  await page.goto("http://127.0.0.1:5173/#" + path);
+  await page.goto(baseURL + "/#" + path);
   await page.locator(".bottom-nav").waitFor();
 };
 const closeToast = async () => {

@@ -2,6 +2,10 @@ import { chromium } from "playwright";
 import fs from "node:fs/promises";
 await fs.mkdir("test-results", { recursive: true });
 import assert from "node:assert/strict";
+const base = (process.env.PACE_QA_BASE_URL || "http://127.0.0.1:4173/").replace(
+  /\/$/,
+  "",
+);
 const browser = await chromium.launch({
   executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
   headless: true,
@@ -18,13 +22,10 @@ const errors = [],
   externalRequests = [];
 page.on("pageerror", (e) => errors.push(e.message));
 page.on("request", (r) => {
-  if (
-    !r.url().startsWith("http://127.0.0.1:4173/") &&
-    !r.url().startsWith("data:")
-  )
+  if (!r.url().startsWith(base + "/") && !r.url().startsWith("data:"))
     externalRequests.push(r.url());
 });
-await page.goto("http://127.0.0.1:4173/");
+await page.goto(base + "/");
 await page.getByRole("button", { name: "設定をあとで行う" }).click();
 await page.locator(".hero-card").waitFor();
 await page.evaluate(async () => {
@@ -76,7 +77,7 @@ for (const route of [
   "/manage/incomes",
   "/settings",
 ]) {
-  await page.goto("http://127.0.0.1:4173/#" + route);
+  await page.goto(base + "/#" + route);
   await page.locator(".page").waitFor();
 }
 await page.getByRole("button", { name: "バックアップと書き出し" }).click();

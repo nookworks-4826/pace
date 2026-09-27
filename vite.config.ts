@@ -9,7 +9,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "prompt",
-      includeAssets: ["icon.svg", "apple-touch-icon.png"],
+      includeAssets: ["icon.svg", "apple-touch-icon-sunny.png"],
       manifest: {
         name: APP_NAME,
         short_name: APP_NAME,
@@ -19,23 +19,23 @@ export default defineConfig({
         scope: "./",
         display: "standalone",
         orientation: "portrait-primary",
-        theme_color: "#153d53",
-        background_color: "#f4f7f8",
+        theme_color: "#ffdf79",
+        background_color: "#fafbf8",
         icons: [
           {
-            src: "icon-192.png",
+            src: "icon-sunny-192.png",
             sizes: "192x192",
             type: "image/png",
             purpose: "any",
           },
           {
-            src: "icon-512.png",
+            src: "icon-sunny-512.png",
             sizes: "512x512",
             type: "image/png",
             purpose: "any",
           },
           {
-            src: "icon-maskable.png",
+            src: "icon-sunny-maskable.png",
             sizes: "512x512",
             type: "image/png",
             purpose: "maskable",

@@ -15,6 +15,7 @@ import { FinanceEditor } from "./Management";
 import type { Editor } from "./Management";
 import { SecuritySettings } from "./Security";
 import { yen } from "../components/UI";
+import { PaceJourney } from "../components/PaceJourney";
 
 export function Onboarding() {
   const { data, finance, run } = usePace();
@@ -120,10 +121,14 @@ export function Onboarding() {
           <span key={i} className={i <= step ? "active" : ""} />
         ))}
       </div>
-      <div className="onboarding-illustration">
-        <Icon size={48} strokeWidth={1.3} />
-        <span className="orbit-ring" />
-      </div>
+      {step === 0 || step === 10 ? (
+        <PaceJourney />
+      ) : (
+        <div className="onboarding-illustration">
+          <Icon size={48} strokeWidth={1.3} />
+          <span className="orbit-ring" />
+        </div>
+      )}
       <div className="onboarding-copy">
         <p className="eyebrow">
           {step === 0

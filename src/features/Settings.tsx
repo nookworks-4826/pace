@@ -249,10 +249,10 @@ export function Settings() {
                       <span />
                       {
                         {
-                          default: "Pace Default",
-                          midnight: "Midnight",
-                          forest: "Forest",
-                          mono: "Mono",
+                          default: "サニー",
+                          midnight: "スカイ",
+                          forest: "ミント",
+                          mono: "ニュートラル",
                         }[t]
                       }
                     </button>

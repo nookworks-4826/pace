@@ -476,7 +476,7 @@ export function ExpenseSheet({
               店名から分類しました
             </>
           ) : suggestion.confidence === "medium" ? (
-            `${selectedCategory?.name}？ 分類を確認してください`
+            `${suggestion.source === "pattern" ? "記録からの候補 · " : ""}${selectedCategory?.name}？ 分類を確認してください`
           ) : (
             "カテゴリーはあとから変更できます"
           )}

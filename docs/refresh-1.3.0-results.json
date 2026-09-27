@@ -1,0 +1,348 @@
+{
+  "checks": [
+    "初回はOSがダークでもライト表示、動きを減らす設定を尊重",
+    "未知残高・全角数字・不正入力・不足・予算超過・12桁を確認、試算前後で全DBストア一致",
+    "未登録店名を記録から分類、候補表示後に本人の保存操作で確定",
+    "既存のダーク設定から1タップでライト表示、再起動後も保持",
+    "4テーマ×明暗の主要テキスト48組でコントラスト4.5:1以上"
+  ],
+  "contrasts": [
+    {
+      "theme": "default",
+      "colorMode": "light",
+      "fg": "--text",
+      "bg": "--surface",
+      "ratio": 13.33
+    },
+    {
+      "theme": "default",
+      "colorMode": "light",
+      "fg": "--muted",
+      "bg": "--surface",
+      "ratio": 5.17
+    },
+    {
+      "theme": "default",
+      "colorMode": "light",
+      "fg": "--on-accent",
+      "bg": "--accent",
+      "ratio": 5.77
+    },
+    {
+      "theme": "default",
+      "colorMode": "light",
+      "fg": "--hero-ink",
+      "bg": "--hero-start",
+      "ratio": 11.52
+    },
+    {
+      "theme": "default",
+      "colorMode": "light",
+      "fg": "--hero-ink",
+      "bg": "--hero-end",
+      "ratio": 9.75
+    },
+    {
+      "theme": "default",
+      "colorMode": "light",
+      "fg": "--hero-muted",
+      "bg": "--hero-end",
+      "ratio": 5.65
+    },
+    {
+      "theme": "default",
+      "colorMode": "dark",
+      "fg": "--text",
+      "bg": "--surface",
+      "ratio": 13.33
+    },
+    {
+      "theme": "default",
+      "colorMode": "dark",
+      "fg": "--muted",
+      "bg": "--surface",
+      "ratio": 5.17
+    },
+    {
+      "theme": "default",
+      "colorMode": "dark",
+      "fg": "--on-accent",
+      "bg": "--accent",
+      "ratio": 5.77
+    },
+    {
+      "theme": "default",
+      "colorMode": "dark",
+      "fg": "--hero-ink",
+      "bg": "--hero-start",
+      "ratio": 11.52
+    },
+    {
+      "theme": "default",
+      "colorMode": "dark",
+      "fg": "--hero-ink",
+      "bg": "--hero-end",
+      "ratio": 9.75
+    },
+    {
+      "theme": "default",
+      "colorMode": "dark",
+      "fg": "--hero-muted",
+      "bg": "--hero-end",
+      "ratio": 5.65
+    },
+    {
+      "theme": "midnight",
+      "colorMode": "light",
+      "fg": "--text",
+      "bg": "--surface",
+      "ratio": 12.97
+    },
+    {
+      "theme": "midnight",
+      "colorMode": "light",
+      "fg": "--muted",
+      "bg": "--surface",
+      "ratio": 7.62
+    },
+    {
+      "theme": "midnight",
+      "colorMode": "light",
+      "fg": "--on-accent",
+      "bg": "--accent",
+      "ratio": 7.56
+    },
+    {
+      "theme": "midnight",
+      "colorMode": "light",
+      "fg": "--hero-ink",
+      "bg": "--hero-start",
+      "ratio": 11.52
+    },
+    {
+      "theme": "midnight",
+      "colorMode": "light",
+      "fg": "--hero-ink",
+      "bg": "--hero-end",
+      "ratio": 9.75
+    },
+    {
+      "theme": "midnight",
+      "colorMode": "light",
+      "fg": "--hero-muted",
+      "bg": "--hero-end",
+      "ratio": 5.65
+    },
+    {
+      "theme": "midnight",
+      "colorMode": "dark",
+      "fg": "--text",
+      "bg": "--surface",
+      "ratio": 12.97
+    },
+    {
+      "theme": "midnight",
+      "colorMode": "dark",
+      "fg": "--muted",
+      "bg": "--surface",
+      "ratio": 7.62
+    },
+    {
+      "theme": "midnight",
+      "colorMode": "dark",
+      "fg": "--on-accent",
+      "bg": "--accent",
+      "ratio": 7.56
+    },
+    {
+      "theme": "midnight",
+      "colorMode": "dark",
+      "fg": "--hero-ink",
+      "bg": "--hero-start",
+      "ratio": 10.3
+    },
+    {
+      "theme": "midnight",
+      "colorMode": "dark",
+      "fg": "--hero-ink",
+      "bg": "--hero-end",
+      "ratio": 8.25
+    },
+    {
+      "theme": "midnight",
+      "colorMode": "dark",
+      "fg": "--hero-muted",
+      "bg": "--hero-end",
+      "ratio": 5.18
+    },
+    {
+      "theme": "forest",
+      "colorMode": "light",
+      "fg": "--text",
+      "bg": "--surface",
+      "ratio": 13.33
+    },
+    {
+      "theme": "forest",
+      "colorMode": "light",
+      "fg": "--muted",
+      "bg": "--surface",
+      "ratio": 5.17
+    },
+    {
+      "theme": "forest",
+      "colorMode": "light",
+      "fg": "--on-accent",
+      "bg": "--accent",
+      "ratio": 5.8
+    },
+    {
+      "theme": "forest",
+      "colorMode": "light",
+      "fg": "--hero-ink",
+      "bg": "--hero-start",
+      "ratio": 9.51
+    },
+    {
+      "theme": "forest",
+      "colorMode": "light",
+      "fg": "--hero-ink",
+      "bg": "--hero-end",
+      "ratio": 7.72
+    },
+    {
+      "theme": "forest",
+      "colorMode": "light",
+      "fg": "--hero-muted",
+      "bg": "--hero-end",
+      "ratio": 5.17
+    },
+    {
+      "theme": "forest",
+      "colorMode": "dark",
+      "fg": "--text",
+      "bg": "--surface",
+      "ratio": 13.33
+    },
+    {
+      "theme": "forest",
+      "colorMode": "dark",
+      "fg": "--muted",
+      "bg": "--surface",
+      "ratio": 5.17
+    },
+    {
+      "theme": "forest",
+      "colorMode": "dark",
+      "fg": "--on-accent",
+      "bg": "--accent",
+      "ratio": 5.8
+    },
+    {
+      "theme": "forest",
+      "colorMode": "dark",
+      "fg": "--hero-ink",
+      "bg": "--hero-start",
+      "ratio": 9.51
+    },
+    {
+      "theme": "forest",
+      "colorMode": "dark",
+      "fg": "--hero-ink",
+      "bg": "--hero-end",
+      "ratio": 7.72
+    },
+    {
+      "theme": "forest",
+      "colorMode": "dark",
+      "fg": "--hero-muted",
+      "bg": "--hero-end",
+      "ratio": 5.17
+    },
+    {
+      "theme": "mono",
+      "colorMode": "light",
+      "fg": "--text",
+      "bg": "--surface",
+      "ratio": 13.33
+    },
+    {
+      "theme": "mono",
+      "colorMode": "light",
+      "fg": "--muted",
+      "bg": "--surface",
+      "ratio": 5.17
+    },
+    {
+      "theme": "mono",
+      "colorMode": "light",
+      "fg": "--on-accent",
+      "bg": "--accent",
+      "ratio": 7.78
+    },
+    {
+      "theme": "mono",
+      "colorMode": "light",
+      "fg": "--hero-ink",
+      "bg": "--hero-start",
+      "ratio": 9.43
+    },
+    {
+      "theme": "mono",
+      "colorMode": "light",
+      "fg": "--hero-ink",
+      "bg": "--hero-end",
+      "ratio": 7.77
+    },
+    {
+      "theme": "mono",
+      "colorMode": "light",
+      "fg": "--hero-muted",
+      "bg": "--hero-end",
+      "ratio": 4.97
+    },
+    {
+      "theme": "mono",
+      "colorMode": "dark",
+      "fg": "--text",
+      "bg": "--surface",
+      "ratio": 13.33
+    },
+    {
+      "theme": "mono",
+      "colorMode": "dark",
+      "fg": "--muted",
+      "bg": "--surface",
+      "ratio": 5.17
+    },
+    {
+      "theme": "mono",
+      "colorMode": "dark",
+      "fg": "--on-accent",
+      "bg": "--accent",
+      "ratio": 7.78
+    },
+    {
+      "theme": "mono",
+      "colorMode": "dark",
+      "fg": "--hero-ink",
+      "bg": "--hero-start",
+      "ratio": 9.43
+    },
+    {
+      "theme": "mono",
+      "colorMode": "dark",
+      "fg": "--hero-ink",
+      "bg": "--hero-end",
+      "ratio": 7.77
+    },
+    {
+      "theme": "mono",
+      "colorMode": "dark",
+      "fg": "--hero-muted",
+      "bg": "--hero-end",
+      "ratio": 4.97
+    }
+  ],
+  "errors": []
+}

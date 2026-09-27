@@ -1,0 +1,10 @@
+{
+  "offlineReload": true,
+  "expensePersisted": true,
+  "allRoutes": true,
+  "excelExport": true,
+  "externalRequests": [],
+  "errors": [],
+  "cachedAssets": 17,
+  "manifestCached": true
+}

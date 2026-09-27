@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Fingerprint, LockKeyhole, ShieldCheck } from "lucide-react";
+import { Fingerprint, KeyRound, LockKeyhole, ShieldCheck } from "lucide-react";
 import { AsyncForm, Field, textValue } from "../components/UI";
 import {
   disableLock,
@@ -7,6 +7,8 @@ import {
   checkDeviceAuthSupport,
   deviceAuthSupportText,
   registerDeviceAuth,
+  registerPasskey,
+  isPasskeyRegistered,
   setPin,
   verifyDeviceAuth,
   verifyPin,
@@ -26,8 +28,10 @@ export function LockScreen({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   let kind = "none";
+  let passkey = false;
   try {
     kind = getLockConfig().kind;
+    passkey = isPasskeyRegistered();
   } catch {
     /* configError is shown without access */
   }
@@ -70,11 +74,12 @@ export function LockScreen({
               }}
             >
               <Fingerprint size={22} />
-              {busy ? "確認しています…" : "デバイスで認証"}
+              {busy
+                ? "確認しています…"
+                : passkey
+                  ? "パスキーで解除"
+                  : "デバイスで認証"}
             </button>
-            <p className="hint">
-              指紋・顔認証・端末の画面ロックなど、端末で利用できる方法で確認します。
-            </p>
           </>
         ) : (
           <AsyncForm
@@ -112,7 +117,8 @@ export function LockScreen({
           </p>
           {kind === "device" && (
             <p className="hint">
-              Galaxyでは端末設定に指紋が登録されていることを確認してください。認証画面で端末の画面ロックが提示された場合は、それも利用できます。設定したときと同じブラウザ・URLで開いてください。
+              Galaxyでは指紋、iPhoneではFace ID・Touch
+              IDと画面ロックの設定を確認してください。認証画面に端末のPIN・パスコードが表示された場合は、それも利用できます。登録したパスキーを保存先から削除せず、設定したときと同じブラウザ・URLで開いてください。
             </p>
           )}
         </details>
@@ -130,7 +136,19 @@ export function SecuritySettings() {
   const [support, setSupport] = useState<DeviceAuthSupport | null>(null);
   const [checkRevision, setCheckRevision] = useState(0);
   const [kind, setKind] = useState(() => getLockConfig().kind);
-  const [choice, setChoice] = useState<"pin" | "device" | "none" | null>(null);
+  const [passkey, setPasskey] = useState(isPasskeyRegistered);
+  const [choice, setChoice] = useState<
+    "pin" | "device" | "passkey" | "none" | null
+  >(null);
+  const [confirmed, setConfirmed] = useState<{
+    at: number;
+    config: string;
+  } | null>(null);
+  const [changing, setChanging] = useState(false);
+  const choose = (value: typeof choice) => {
+    setConfirmed(null);
+    setChoice(value);
+  };
   useEffect(() => {
     let active = true;
     let pending = false;
@@ -155,6 +173,8 @@ export function SecuritySettings() {
   }, [checkRevision]);
   const notify = () => {
     setKind(getLockConfig().kind);
+    setPasskey(isPasskeyRegistered());
+    setConfirmed(null);
     setChoice(null);
     window.dispatchEvent(new Event("pace-lock-changed"));
     toast("ロック設定を保存しました");
@@ -169,65 +189,67 @@ export function SecuritySettings() {
             ? "ロックなし"
             : kind === "pin"
               ? "6桁PIN"
-              : "デバイス認証"}
+              : passkey
+                ? "パスキー"
+                : "デバイス認証"}
         </span>
       </div>
-      <div className="device-auth-guide">
-        <strong>
-          <Fingerprint size={18} /> 指紋・顔認証などに対応
-        </strong>
-        <p className="hint">
-          Galaxyの指紋認証、iPhoneのFace ID・Touch
-          IDなどを利用できます。実際の方法は端末とブラウザによって異なり、端末の画面ロックで確認する場合もあります。
-        </p>
-        <details>
-          <summary>Galaxyで指紋認証を使う準備</summary>
-          <ol>
-            <li>
-              Galaxyの設定で「指紋」を検索し、画面ロックと指紋を登録します。
-            </li>
-            <li>
-              Chromeまたは対応するSamsung
-              Internetで、このアプリのHTTPSの公開URLを開きます。
-            </li>
-            <li>
-              下の「デバイス認証」を選んで設定し、端末に表示される案内に従います。
-            </li>
-          </ol>
-          <p className="hint">
-            指紋の画像や生体情報をアプリが取得・保存することはありません。認証の保存先はOSの設定に従います。ブラウザを切り替えると家計データの保存領域も変わるため、普段使うブラウザで設定してください。
-          </p>
-        </details>
-      </div>
+      {kind === "device" && !choice && (
+        <AsyncForm
+          label="認証を試す"
+          onSubmit={async () => {
+            if (!(await verifyDeviceAuth()))
+              throw new Error(
+                "認証を完了できませんでした。もう一度お試しください。",
+              );
+            toast(
+              passkey
+                ? "パスキーで認証できました"
+                : "デバイス認証を確認できました",
+            );
+          }}
+          children={null}
+        />
+      )}
       <div className="security-options">
         <button
+          className={`button ${choice === "passkey" ? "button-primary" : "button-secondary"}`}
+          disabled={support !== "available" || changing}
+          onClick={() => choose("passkey")}
+        >
+          <KeyRound size={19} /> パスキー
+        </button>
+        <button
           className={`button ${choice === "device" ? "button-primary" : "button-secondary"}`}
-          disabled={support !== "available"}
-          onClick={() => setChoice("device")}
+          disabled={support !== "available" || changing}
+          onClick={() => choose("device")}
         >
           <Fingerprint size={19} />
           デバイス認証
         </button>
         <button
           className={`button ${choice === "pin" ? "button-primary" : "button-secondary"}`}
-          onClick={() => setChoice("pin")}
+          disabled={changing}
+          onClick={() => choose("pin")}
         >
           <LockKeyhole size={19} />
           6桁PIN
         </button>
         <button
           className="text-button"
-          disabled={kind === "none"}
-          onClick={() => setChoice("none")}
+          disabled={kind === "none" || changing}
+          onClick={() => choose("none")}
         >
           ロックなし
         </button>
       </div>
-      <p className="hint" role="status">
-        {support === null
-          ? "認証への対応状況を確認しています…"
-          : deviceAuthSupportText[support]}
-      </p>
+      {support !== "available" && (
+        <p className="hint" role="status">
+          {support === null
+            ? "認証への対応状況を確認しています…"
+            : deviceAuthSupportText[support]}
+        </p>
+      )}
       {support !== "available" && (
         <button
           className="text-button"
@@ -240,50 +262,67 @@ export function SecuritySettings() {
           もう一度確認
         </button>
       )}
-      {kind === "device" && !choice && (
-        <AsyncForm
-          label="認証を試す"
-          onSubmit={async () => {
-            if (!(await verifyDeviceAuth()))
-              throw new Error(
-                "認証を完了できませんでした。もう一度お試しください。",
-              );
-            toast("デバイス認証を確認できました");
-          }}
-        >
-          <p className="hint">
-            登録した指紋・顔認証などで、この端末からロックを解除できるか確認します。
-          </p>
-        </AsyncForm>
-      )}
       {choice && (
         <AsyncForm
+          key={`${choice}-${Boolean(confirmed)}`}
           label={
-            choice === "none"
-              ? "ロックを解除する"
-              : choice === "device"
-                ? "デバイス認証を設定"
-                : "PINを設定"
+            choice === "passkey"
+              ? kind !== "none" && !confirmed
+                ? "現在のロックで確認"
+                : "パスキーを登録"
+              : choice === "none"
+                ? "ロックを解除する"
+                : choice === "device"
+                  ? "デバイス認証を設定"
+                  : "PINを設定"
           }
           onSubmit={async (f) => {
-            if (
-              kind === "pin" &&
-              !(await verifyPin(textValue(f, "currentPin")))
-            )
-              throw new Error("現在のPINが一致しません。");
-            if (kind === "device" && !(await verifyDeviceAuth()))
-              throw new Error("現在のデバイス認証を完了してください。");
-            if (choice === "pin") {
-              const pin = textValue(f, "newPin");
-              if (pin !== textValue(f, "confirmPin"))
-                throw new Error("2回のPINが一致しません。");
-              await setPin(pin);
-            } else if (choice === "device") await registerDeviceAuth();
-            else disableLock();
-            notify();
+            setChanging(true);
+            try {
+              // A separate button press after reauthentication preserves the user
+              // gesture required by some Safari/passkey providers for create().
+              if (choice === "passkey" && confirmed) {
+                if (
+                  Date.now() - confirmed.at > 60_000 ||
+                  confirmed.config !== JSON.stringify(getLockConfig())
+                ) {
+                  setConfirmed(null);
+                  throw new Error("もう一度、現在のロックで確認してください。");
+                }
+                await registerPasskey();
+                notify();
+                return;
+              }
+              if (
+                kind === "pin" &&
+                !(await verifyPin(textValue(f, "currentPin")))
+              )
+                throw new Error("現在のPINが一致しません。");
+              if (kind === "device" && !(await verifyDeviceAuth()))
+                throw new Error("現在のデバイス認証を完了してください。");
+              if (choice === "passkey") {
+                if (kind !== "none") {
+                  setConfirmed({
+                    at: Date.now(),
+                    config: JSON.stringify(getLockConfig()),
+                  });
+                  return;
+                }
+                await registerPasskey();
+              } else if (choice === "pin") {
+                const pin = textValue(f, "newPin");
+                if (pin !== textValue(f, "confirmPin"))
+                  throw new Error("2回のPINが一致しません。");
+                await setPin(pin);
+              } else if (choice === "device") await registerDeviceAuth();
+              else disableLock();
+              notify();
+            } finally {
+              setChanging(false);
+            }
           }}
         >
-          {kind === "pin" && (
+          {kind === "pin" && !confirmed && (
             <Field label="現在のPIN">
               <input
                 type="password"
@@ -322,13 +361,12 @@ export function SecuritySettings() {
               </Field>
             </>
           )}
-          {choice === "device" && (
-            <p className="hint">
-              Galaxyの指紋認証・Face ID・Touch
-              IDなど、端末で利用できる方法を使います。指紋だけに限定する設定はなく、端末の画面ロックが使われる場合もあります。
-            </p>
-          )}
         </AsyncForm>
+      )}
+      {choice && !changing && (
+        <button className="text-button" onClick={() => choose(null)}>
+          変更をやめる
+        </button>
       )}
       <Field label="アプリを離れてから再認証するまで">
         <select
@@ -347,9 +385,58 @@ export function SecuritySettings() {
           <option value="900">15分</option>
         </select>
       </Field>
-      <p className="hint">
-        アプリの起動時は毎回認証します。このロックは画面の閲覧を防ぐためのもので、端末内データ自体は暗号化しません。PINはソルト付きハッシュで保存します。バックアップは別途暗号化できます。
-      </p>
+      <details className="security-help">
+        <summary>ヘルプ</summary>
+        <div className="device-auth-guide">
+          <strong>
+            <Fingerprint size={18} /> 指紋・顔認証などに対応
+          </strong>
+          <p className="hint">
+            Galaxyの指紋認証、iPhoneのFace ID・Touch
+            IDなどを利用できます。実際の方法は端末とブラウザによって異なり、端末の画面ロックで確認する場合もあります。
+          </p>
+          <details>
+            <summary>Galaxyでパスキーを使う準備</summary>
+            <ol>
+              <li>
+                Galaxyの設定で「指紋」を検索し、画面ロックと指紋を登録します。
+              </li>
+              <li>
+                普段Paceを使うChromeなどの対応ブラウザで、このアプリのHTTPSの公開URLを開きます。
+              </li>
+              <li>
+                「パスキー」→「パスキーを登録」を押し、端末が表示する保存先と本人確認の案内に従います。
+              </li>
+            </ol>
+            <p className="hint">
+              指紋の画像や生体情報をアプリが取得・保存することはありません。認証の保存先はOSの設定に従います。ブラウザを切り替えると家計データの保存領域も変わるため、普段使うブラウザで設定してください。
+            </p>
+          </details>
+          <details>
+            <summary>iPhoneでパスキーを使う準備</summary>
+            <ol>
+              <li>
+                iPhoneの設定でFace IDまたはTouch IDとパスコードを設定します。
+              </li>
+              <li>
+                「パスワード」など、利用するパスキーの保存先を有効にします。
+              </li>
+              <li>
+                普段使うPaceを開き、「パスキー」→「パスキーを登録」を押して、端末の案内に従います。
+              </li>
+            </ol>
+          </details>
+          <p className="hint">
+            パスキーはPaceを開く鍵です。保存先の設定によって鍵が同期されても、家計データはこの端末内に残り、他の端末へ自動では移りません。
+          </p>
+        </div>
+        <p className="hint">
+          アプリの起動時は毎回認証します。このロックは画面の閲覧を防ぐためのもので、端末内データ自体は暗号化しません。PINはソルト付きハッシュで保存します。バックアップは別途暗号化できます。
+        </p>
+        <p className="hint">
+          PIN・デバイス認証・パスキーは、いずれか1つを設定します。家計データのバックアップにパスキーは含みません。復元先では改めて登録してください。ロックを変更・解除しても、保存先にあるパスキー自体は自動では削除されません。
+        </p>
+      </details>
     </div>
   );
 }

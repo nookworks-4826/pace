@@ -1,0 +1,345 @@
+/* Sunny surfaces, clear outcomes, and brief motion instead of idle animation. */
+.home-actions {
+  display: flex;
+  gap: 4px;
+}
+.brand img {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+}
+.brand-dot {
+  display: none;
+}
+.hero-card {
+  color: var(--hero-ink);
+  box-shadow: 0 12px 32px -24px var(--hero-shadow);
+}
+.hero-card:before {
+  border-color: var(--hero-rule);
+  width: 220px;
+  height: 220px;
+  right: -100px;
+  top: -140px;
+}
+.hero-card.is-negative {
+  background: linear-gradient(120deg, #ffe6dc, #ffd1c5);
+  --hero-ink: #6c2c28;
+  --hero-muted: #763e34;
+  --hero-rule: #913d322d;
+  --hero-free: #9d493d;
+  --hero-reserved: #a85b4333;
+}
+.hero-card.is-caution {
+  background: linear-gradient(120deg, #fff0ba, #ffd995);
+  --hero-ink: #59421e;
+  --hero-muted: #69502b;
+  --hero-rule: #92743038;
+  --hero-free: #87612a;
+  --hero-reserved: #906b323d;
+}
+.hero-top,
+.hero-status,
+.hero-footer {
+  color: var(--hero-muted);
+}
+.hero-top {
+  font-weight: 650;
+}
+.hero-amount {
+  font-weight: 730;
+  letter-spacing: -0.055em;
+  animation: amount-arrive 0.28s ease-out both;
+}
+.hero-status {
+  margin-bottom: 17px;
+}
+.status-line {
+  background: var(--hero-free);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.hero-footer {
+  border-top-color: var(--hero-rule);
+}
+.hero-footer strong {
+  color: var(--hero-ink);
+}
+.money-allocation {
+  margin: 15px 0 5px;
+}
+.money-allocation-track {
+  height: 8px;
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--hero-reserved);
+}
+.money-allocation-track > span {
+  display: block;
+  height: 100%;
+  background: var(--hero-free);
+  border-radius: inherit;
+  transition: width 0.45s ease;
+}
+.money-allocation-labels {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--hero-muted);
+  font-size: 0.66rem;
+  margin-top: 7px;
+}
+.money-allocation-labels > span {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+}
+.money-allocation-labels i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--hero-free);
+}
+.money-allocation-labels span:last-child i {
+  background: var(--hero-reserved);
+  border: 1px solid var(--hero-rule);
+}
+.today-card {
+  border-color: var(--line-strong);
+}
+.today-card .progress {
+  height: 7px;
+}
+.today-remaining strong {
+  font-weight: 720;
+}
+.primary-add {
+  box-shadow: 0 8px 20px -15px var(--accent);
+}
+.purchase-entry {
+  display: flex;
+  text-align: left;
+  align-items: center;
+  gap: 13px;
+  padding: 15px 17px;
+  width: 100%;
+  margin: 14px 0;
+}
+.purchase-entry-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  background: var(--soft);
+}
+.purchase-entry > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+.purchase-entry strong {
+  display: block;
+  font-size: 0.92rem;
+}
+.purchase-entry small {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.73rem;
+}
+.purchase-entry > svg {
+  color: var(--muted);
+}
+.purchase-preview {
+  display: grid;
+  gap: 16px;
+}
+.purchase-amount {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border-bottom: 2px solid var(--accent);
+  padding: 5px 0 8px;
+}
+.purchase-amount > span {
+  font-size: 1.6rem;
+  color: var(--muted);
+}
+.purchase-amount input {
+  border: 0;
+  background: transparent;
+  width: 100%;
+  padding: 0;
+  font-size: clamp(1.5rem, 7vw, 2.3rem);
+  font-weight: 700;
+  border-radius: 0;
+}
+.amount-chips {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.amount-chips button {
+  min-height: 44px;
+  padding: 6px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 30px;
+  font-size: 0.83rem;
+  background: var(--surface);
+}
+.amount-chips button[aria-pressed="true"] {
+  color: var(--on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.preview-result {
+  border-radius: 20px;
+  padding: 23px 19px;
+  background: var(--soft);
+}
+.preview-change {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 9px 0 4px;
+  font-variant-numeric: tabular-nums;
+}
+.preview-change > span {
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+.preview-change > svg {
+  color: var(--muted);
+}
+.preview-change strong {
+  font-size: clamp(1.3rem, 6.5vw, 2.2rem);
+  line-height: 1.4;
+  animation: amount-arrive 0.22s ease-out;
+  overflow-wrap: anywhere;
+}
+.preview-result > p {
+  font-size: 0.77rem;
+  color: var(--muted);
+}
+.preview-next {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid var(--line-strong);
+  margin-top: 18px;
+  padding-top: 14px;
+  font-size: 0.8rem;
+}
+.preview-next b {
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+}
+.preview-result .preview-negative {
+  color: var(--danger);
+}
+.purchase-preview > details {
+  margin-top: 0;
+}
+.pace-journey {
+  width: min(280px, 86%);
+  height: 148px;
+  display: block;
+  margin: 25px auto;
+}
+.journey-path {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+  animation: journey-draw 0.85s ease-out both;
+}
+.journey-marker {
+  transform-origin: 232px 55px;
+  animation: checkpoint 0.4s 0.55s ease-out both;
+}
+.onboarding-illustration {
+  background: var(--soft);
+  color: var(--accent);
+}
+.onboarding-illustration .orbit-ring {
+  border-color: var(--line-strong);
+}
+.onboarding {
+  background: var(--bg);
+}
+.lock-logo {
+  width: 76px;
+  border-radius: 21px;
+  box-shadow: 0 9px 24px -15px #96762666;
+}
+.boot-logo img {
+  width: 70px;
+  border-radius: 20px;
+  animation: amount-arrive 0.35s ease-out both;
+}
+.toast > svg polyline {
+  stroke-dasharray: 30;
+  stroke-dashoffset: 0;
+  animation: check-draw 0.32s ease-out both;
+}
+.theme-picker [data-swatch="default"] > span {
+  background: #ffdb67;
+}
+.theme-picker [data-swatch="midnight"] > span {
+  background: #b9d6ff;
+}
+.theme-picker [data-swatch="forest"] > span {
+  background: #a9e2c3;
+}
+.theme-picker [data-swatch="mono"] > span {
+  background: #ddd6c8;
+}
+@keyframes amount-arrive {
+  from {
+    opacity: 0.5;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes journey-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes checkpoint {
+  from {
+    transform: scale(0.5);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+@keyframes check-draw {
+  from {
+    stroke-dashoffset: 30;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-amount,
+  .preview-change strong,
+  .journey-path,
+  .journey-marker,
+  .boot-logo img,
+  .toast > svg polyline {
+    animation: none;
+  }
+  .money-allocation-track > span {
+    transition: none;
+  }
+}

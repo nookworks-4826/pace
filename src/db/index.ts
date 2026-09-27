@@ -32,7 +32,7 @@ export const defaultSettings: AppSettings = {
   openingLiquidBalance: null,
   salarySchedule: null,
   theme: "default",
-  colorMode: "system",
+  colorMode: "light",
   onboardingCompleted: false,
   setupReviewed: [],
   helpDismissed: false,

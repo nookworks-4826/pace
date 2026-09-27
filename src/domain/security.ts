@@ -10,6 +10,9 @@ import { APP_NAME } from "../types";
  * Assertions are verified locally following https://www.w3.org/TR/webauthn-3/ .
  */
 const STORAGE_KEY = "pace:local-lock:v1";
+// Display metadata only. Keep the v1 security record readable by existing app tabs.
+// A missing/stale label never changes which public key may unlock the app.
+const PASSKEY_LABEL_KEY = "pace:passkey-label:v1";
 const ITERATIONS = 310_000;
 const encoder = new TextEncoder();
 const noneSchema = z.object({ kind: z.literal("none") }).strict();
@@ -85,6 +88,25 @@ export function getLockConfig(): LockConfig {
 function store(config: LockConfig): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
 }
+export function isPasskeyRegistered(): boolean {
+  const config = getLockConfig();
+  try {
+    return (
+      config.kind === "device" &&
+      localStorage.getItem(PASSKEY_LABEL_KEY) === config.credentialId
+    );
+  } catch {
+    return false;
+  }
+}
+function labelPasskey(credentialId?: string): void {
+  try {
+    if (credentialId) localStorage.setItem(PASSKEY_LABEL_KEY, credentialId);
+    else localStorage.removeItem(PASSKEY_LABEL_KEY);
+  } catch {
+    // Labels are optional; the successfully stored lock remains usable.
+  }
+}
 async function hashPin(
   pin: string,
   salt: Uint8Array<ArrayBuffer>,
@@ -118,6 +140,7 @@ export async function setPin(pin: string): Promise<void> {
     failedAttempts: 0,
     lockedUntil: 0,
   });
+  labelPasskey();
 }
 let pinAttemptInFlight = false;
 export async function verifyPin(pin: string): Promise<boolean> {
@@ -157,6 +180,7 @@ export async function verifyPin(pin: string): Promise<boolean> {
 }
 export function disableLock(): void {
   localStorage.removeItem(STORAGE_KEY);
+  labelPasskey();
 }
 export type DeviceAuthSupport =
   | "available"
@@ -168,7 +192,7 @@ export type DeviceAuthSupport =
 
 export const deviceAuthSupportText: Record<DeviceAuthSupport, string> = {
   available:
-    "この環境ではデバイス認証を設定できます。認証方法は端末が選びます。",
+    "端末の認証を利用できます。パスキーの保存可否と認証方法は、登録時に端末が確認します。",
   "insecure-context":
     "デバイス認証にはHTTPSの公開URLが必要です。スマートフォンでは公開したURLで開いてください。",
   "invalid-domain":
@@ -351,6 +375,15 @@ export function derToRawSignature(
 }
 
 export async function registerDeviceAuth(): Promise<void> {
+  await registerPlatformCredential(false);
+}
+
+/** A discoverable credential saved by the platform's passkey provider. */
+export async function registerPasskey(): Promise<void> {
+  await registerPlatformCredential(true);
+}
+
+async function registerPlatformCredential(passkey: boolean): Promise<void> {
   const support = await checkDeviceAuthSupport();
   if (support !== "available") throw new Error(deviceAuthSupportText[support]);
   const rpId = location.hostname;
@@ -369,9 +402,11 @@ export async function registerDeviceAuth(): Promise<void> {
         pubKeyCredParams: [{ type: "public-key", alg: -7 }],
         authenticatorSelection: {
           authenticatorAttachment: "platform",
-          residentKey: "discouraged",
+          residentKey: passkey ? "required" : "discouraged",
+          requireResidentKey: passkey,
           userVerification: "required",
         },
+        ...(passkey ? { extensions: { credProps: true } } : {}),
         timeout: 60_000,
         attestation: "none",
       },
@@ -381,6 +416,15 @@ export async function registerDeviceAuth(): Promise<void> {
       !(credential.response instanceof AuthenticatorAttestationResponse)
     )
       throw new Error("デバイス認証を完了できませんでした。");
+    // Some clients omit credProps. residentKey: required remains authoritative.
+    // Explicit failure must not replace the user's existing lock.
+    if (
+      passkey &&
+      credential.getClientExtensionResults().credProps?.rk === false
+    )
+      throw new Error(
+        "この環境ではパスキーを保存できませんでした。デバイス認証または6桁PINを利用できます。",
+      );
     await validateClientData(
       credential.response.clientDataJSON,
       challenge,
@@ -449,17 +493,22 @@ export async function registerDeviceAuth(): Promise<void> {
       origin,
       signCount,
     });
+    labelPasskey(
+      passkey ? encode(new Uint8Array(credential.rawId)) : undefined,
+    );
   } catch (error) {
     if (
       error instanceof DOMException &&
       (error.name === "NotAllowedError" || error.name === "AbortError")
     )
       throw new Error(
-        "デバイス認証がキャンセルされました。もう一度試すかPINを設定できます。",
+        "認証がキャンセルされたか、時間内に完了しませんでした。現在のロック設定は変更していません。もう一度お試しください。",
       );
     if (error instanceof Error && !(error instanceof DOMException)) throw error;
     throw new Error(
-      "デバイス認証を設定できませんでした。この環境ではPINをご利用ください。",
+      passkey
+        ? "パスキーを登録できませんでした。端末の画面ロックとパスキーの保存先を確認してください。デバイス認証または6桁PINも利用できます。"
+        : "デバイス認証を設定できませんでした。この環境ではPINをご利用ください。",
     );
   }
 }

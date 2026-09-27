@@ -1,6 +1,9 @@
 import { chromium } from "playwright";
 import fs from "node:fs/promises";
 import assert from "node:assert/strict";
+const baseURL = (
+  process.env.PACE_QA_BASE_URL || "http://127.0.0.1:5173/"
+).replace(/\/$/, "");
 await fs.mkdir("test-results", { recursive: true });
 const browser = await chromium.launch({
   executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
@@ -25,7 +28,7 @@ page.on("console", (m) => {
 });
 await fs.mkdir("test-results", { recursive: true });
 await fs.mkdir("test-results/screenshots", { recursive: true });
-await page.goto("http://127.0.0.1:5173/");
+await page.goto(baseURL + "/");
 await page.locator(".onboarding").waitFor();
 await page.evaluate(async () => {
   const { db, updateSettings } = await import("/src/db/index.ts");
@@ -173,7 +176,7 @@ for (const width of [375, 390, 430, 768, 1024]) {
     "/manage/recurring",
     "/settings",
   ]) {
-    await page.goto("http://127.0.0.1:5173/#" + route);
+    await page.goto(baseURL + "/#" + route);
     await page.locator(".page").waitFor();
     if (route === "/analytics")
       await page.locator(".analytics-section").first().waitFor();
@@ -210,7 +213,7 @@ for (const width of [375, 390, 430, 768, 1024]) {
   checks.push(`${width}px:8画面横スクロール検査`);
 }
 await page.setViewportSize({ width: 375, height: 812 });
-await page.goto("http://127.0.0.1:5173/#/");
+await page.goto(baseURL + "/#/");
 await page.getByRole("button", { name: "支出を追加", exact: true }).click();
 await page.getByLabel("クイック入力").fill("セブン 560");
 await page.getByRole("button", { name: "反映", exact: true }).click();
@@ -231,12 +234,12 @@ await page.evaluate(async () => {
   const { updateSettings } = await import("/src/db/index.ts");
   await updateSettings({ colorMode: "dark" });
 });
-await page.goto("http://127.0.0.1:5173/#/");
+await page.goto(baseURL + "/#/");
 await page.screenshot({
   path: "test-results/screenshots/home-dark-375.png",
   animations: "disabled",
 });
-await page.goto("http://127.0.0.1:5173/#/analytics");
+await page.goto(baseURL + "/#/analytics");
 await page.locator(".analytics-section").first().waitFor();
 await page.screenshot({
   path: "test-results/analytics-dark.png",
@@ -265,12 +268,12 @@ await page.evaluate(async () => {
     updatedAt: at,
   });
 });
-await page.goto("http://127.0.0.1:5173/#/");
+await page.goto(baseURL + "/#/");
 await page.screenshot({
   path: "test-results/negative-large.png",
   animations: "disabled",
 });
-await page.goto("http://127.0.0.1:5173/#/history");
+await page.goto(baseURL + "/#/history");
 await page.screenshot({
   path: "test-results/history-long.png",
   animations: "disabled",
@@ -295,7 +298,7 @@ await page.evaluate(async () => {
   );
 });
 const start = Date.now();
-await page.goto("http://127.0.0.1:5173/#/history");
+await page.goto(baseURL + "/#/history");
 await page.waitForFunction(
   () => document.querySelectorAll(".transaction-row").length === 60,
 );
@@ -306,7 +309,7 @@ await page.evaluate(async () => {
   await updateSettings({ openingLiquidBalance: 999999999999 });
   await db.budgets.clear();
 });
-await page.goto("http://127.0.0.1:5173/#/");
+await page.goto(baseURL + "/#/");
 await page.waitForFunction(
   () =>
     Number(

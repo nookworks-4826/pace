@@ -1,0 +1,97 @@
+{
+  "passed": true,
+  "passkeys": false,
+  "offlineRequested": true,
+  "offlineEvidence": {
+    "controlledReload": true,
+    "blockedUncachedRequest": true,
+    "navigatorOnline": true
+  },
+  "checks": [
+    "Android mobile環境でplatform認証器を登録（userVerification: required）",
+    "設定内の『認証を試す』で署名検証と成功表示を確認",
+    "再読込時はロックされ、platform認証の成功後だけ解除",
+    "本番PWAをオフラインで再読込し、仮想platform認証器で解除",
+    "認証の登録・試行・再起動後もIndexedDBの全ストアの内容が一致",
+    "platform認証器を利用できない場合も6桁PINを設定し、再読込後にPINで解除"
+  ],
+  "layoutChecks": [
+    {
+      "scenario": "galaxy-security-settings",
+      "width": 360,
+      "passed": true
+    },
+    {
+      "scenario": "galaxy-security-settings",
+      "width": 375,
+      "passed": true
+    },
+    {
+      "scenario": "galaxy-security-settings",
+      "width": 390,
+      "passed": true
+    },
+    {
+      "scenario": "galaxy-security-settings",
+      "width": 430,
+      "passed": true
+    },
+    {
+      "scenario": "galaxy-security-settings",
+      "width": 768,
+      "passed": true
+    },
+    {
+      "scenario": "galaxy-lock-screen",
+      "width": 360,
+      "passed": true
+    },
+    {
+      "scenario": "galaxy-lock-screen",
+      "width": 375,
+      "passed": true
+    },
+    {
+      "scenario": "galaxy-lock-screen",
+      "width": 390,
+      "passed": true
+    },
+    {
+      "scenario": "galaxy-lock-screen",
+      "width": 430,
+      "passed": true
+    },
+    {
+      "scenario": "galaxy-lock-screen",
+      "width": 768,
+      "passed": true
+    },
+    {
+      "scenario": "galaxy-pin-fallback",
+      "width": 360,
+      "passed": true
+    },
+    {
+      "scenario": "galaxy-pin-fallback",
+      "width": 375,
+      "passed": true
+    },
+    {
+      "scenario": "galaxy-pin-fallback",
+      "width": 390,
+      "passed": true
+    },
+    {
+      "scenario": "galaxy-pin-fallback",
+      "width": 430,
+      "passed": true
+    },
+    {
+      "scenario": "galaxy-pin-fallback",
+      "width": 768,
+      "passed": true
+    }
+  ],
+  "errors": [],
+  "limitation": "Androidの画面・User-Agentとvirtual CTAP2 internal認証器を使ったChromeのブラウザQAです。Galaxy実機の指紋センサー、Samsung Pass、Samsung Internet、実際のiPhone/Safari/Face ID/Touch IDやプロバイダー間の同期を検証した結果ではありません。端末認証プロバイダーのオフライン動作も実機では未確認です。"
+}

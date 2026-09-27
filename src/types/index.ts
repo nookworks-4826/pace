@@ -183,7 +183,7 @@ export interface AppData {
   favorites: Favorite[];
 }
 export const APP_NAME = "Pace";
-export const APP_VERSION = "1.1.1";
+export const APP_VERSION = "1.3.0";
 export const SCHEMA_VERSION = 1;
 export const paymentLabels: Record<PaymentMethod, string> = {
   cash: "現金",

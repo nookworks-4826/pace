@@ -6,6 +6,11 @@ import assert from "node:assert/strict";
 // virtual authenticators cannot verify a real Galaxy fingerprint sensor.
 const baseURL = process.env.PACE_QA_BASE_URL || "http://localhost:5173/";
 const offlineRequested = process.env.PACE_QA_OFFLINE === "1";
+const passkeys = process.env.PACE_QA_PASSKEY === "1";
+const registerChoice = passkeys ? "パスキー" : "デバイス認証";
+const registerLabel = passkeys ? "パスキーを登録" : "デバイス認証を設定";
+const unlockLabel = passkeys ? "パスキーで解除" : "デバイスで認証";
+const resultPrefix = passkeys ? "passkeys" : "webauthn";
 const androidOptions = {
   viewport: { width: 412, height: 915 },
   deviceScaleFactor: 1,
@@ -23,7 +28,7 @@ let offlineEvidence;
 const checks = [];
 const layoutChecks = [];
 const limitation =
-  "Androidの画面・User-Agentとvirtual CTAP2 internal認証器を使ったブラウザQAです。Galaxy実機の指紋センサー、Samsung Pass、Samsung Internetでの認証を検証した結果ではありません。" +
+  "Androidの画面・User-Agentとvirtual CTAP2 internal認証器を使ったChromeのブラウザQAです。Galaxy実機の指紋センサー、Samsung Pass、Samsung Internet、実際のiPhone/Safari/Face ID/Touch IDやプロバイダー間の同期を検証した結果ではありません。" +
   (offlineRequested
     ? "端末認証プロバイダーのオフライン動作も実機では未確認です。"
     : "");
@@ -57,7 +62,7 @@ async function openLockSettings(page) {
 }
 
 async function verifyMobileWidths(page, scenario) {
-  for (const width of [412, 360]) {
+  for (const width of [360, 375, 390, 430, 768]) {
     await page.setViewportSize({ width, height: 915 });
     const measurements = await page.evaluate(() => ({
       viewport: window.innerWidth,
@@ -107,7 +112,16 @@ try {
           options?.publicKey?.authenticatorSelection?.authenticatorAttachment,
         userVerification:
           options?.publicKey?.authenticatorSelection?.userVerification,
+        residentKey: options?.publicKey?.authenticatorSelection?.residentKey,
+        requireResidentKey:
+          options?.publicKey?.authenticatorSelection?.requireResidentKey,
       });
+      if (window.__paceCancelNextRegistration) {
+        window.__paceCancelNextRegistration = false;
+        return Promise.reject(
+          new DOMException("QA cancellation", "NotAllowedError"),
+        );
+      }
       return create(options);
     };
     navigator.credentials.get = (options) => {
@@ -127,43 +141,131 @@ try {
   cdp.on("WebAuthn.credentialAdded", () => registrations++);
   cdp.on("WebAuthn.credentialAsserted", () => assertions++);
   await cdp.send("WebAuthn.enable");
-  await cdp.send("WebAuthn.addVirtualAuthenticator", {
-    options: {
-      protocol: "ctap2",
-      transport: "internal",
-      hasResidentKey: true,
-      hasUserVerification: true,
-      isUserVerified: true,
-      automaticPresenceSimulation: true,
+  const { authenticatorId } = await cdp.send(
+    "WebAuthn.addVirtualAuthenticator",
+    {
+      options: {
+        protocol: "ctap2",
+        transport: "internal",
+        hasResidentKey: true,
+        hasUserVerification: true,
+        isUserVerified: true,
+        automaticPresenceSimulation: true,
+      },
     },
-  });
+  );
 
   await openLockSettings(page);
+  const financialSnapshot = async () =>
+    page.evaluate(async () => {
+      const database = await new Promise((resolve, reject) => {
+        const request = indexedDB.open("pace");
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      try {
+        const names = [...database.objectStoreNames].sort();
+        return await Promise.all(
+          names.map(
+            (name) =>
+              new Promise((resolve, reject) => {
+                const request = database
+                  .transaction(name)
+                  .objectStore(name)
+                  .getAll();
+                request.onsuccess = () => resolve([name, request.result]);
+                request.onerror = () => reject(request.error);
+              }),
+          ),
+        );
+      } finally {
+        database.close();
+      }
+    });
+  const originalData = await financialSnapshot();
   await expect(
     page.getByText("指紋・顔認証などに対応", { exact: true }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "デバイス認証", exact: true }).click();
-  await page
-    .getByRole("button", { name: "デバイス認証を設定", exact: true })
-    .click();
+  ).toBeHidden();
+  if (passkeys) {
+    await page.getByRole("button", { name: "6桁PIN", exact: true }).click();
+    await page.getByLabel("新しい6桁PIN", { exact: true }).fill("472915");
+    await page.getByLabel("PINをもう一度", { exact: true }).fill("472915");
+    await page.getByRole("button", { name: "PINを設定", exact: true }).click();
+    await expect(page.getByText("現在：6桁PIN", { exact: true })).toBeVisible();
+  }
+  await page.getByRole("button", { name: registerChoice, exact: true }).click();
+  if (passkeys) {
+    await page.getByLabel("現在のPIN", { exact: true }).fill("000000");
+    await page
+      .getByRole("button", { name: "現在のロックで確認", exact: true })
+      .click();
+    await expect(page.getByRole("alert")).toContainText(
+      "現在のPINが一致しません",
+    );
+    assert.equal(registrations, 0);
+    await page.getByLabel("現在のPIN", { exact: true }).fill("472915");
+    await page
+      .getByRole("button", { name: "現在のロックで確認", exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", { name: registerLabel, exact: true }),
+    ).toBeVisible();
+    const originalLock = await page.evaluate(() =>
+      localStorage.getItem("pace:local-lock:v1"),
+    );
+    await page.evaluate(() => {
+      window.__paceCancelNextRegistration = true;
+    });
+    await page
+      .getByRole("button", { name: registerLabel, exact: true })
+      .click();
+    await expect(page.getByRole("alert")).toContainText(
+      "現在のロック設定は変更していません",
+    );
+    assert.equal(
+      await page.evaluate(() => localStorage.getItem("pace:local-lock:v1")),
+      originalLock,
+    );
+    checks.push(
+      "誤ったPINでは登録不可。正しいPINで確認後の登録キャンセルでも以前のPIN設定を保持",
+    );
+  }
+  await page.getByRole("button", { name: registerLabel, exact: true }).click();
   await expect(
-    page.getByText("現在：デバイス認証", { exact: true }),
+    page.getByText(`現在：${registerChoice}`, { exact: true }),
   ).toBeVisible();
   await expect.poll(() => registrations).toBe(1);
   const creationPolicies = await page.evaluate(() =>
     window.__paceAuthPolicies.filter((policy) => policy.operation === "create"),
   );
-  assert.equal(creationPolicies.length, 1);
+  assert.equal(creationPolicies.length, passkeys ? 2 : 1);
   assert.equal(creationPolicies[0].attachment, "platform");
   assert.equal(creationPolicies[0].userVerification, "required");
   checks.push(
     "Android mobile環境でplatform認証器を登録（userVerification: required）",
   );
+  if (passkeys) {
+    assert.ok(
+      creationPolicies.every(
+        (policy) =>
+          policy.residentKey === "required" &&
+          policy.requireResidentKey === true,
+      ),
+    );
+    const { credentials } = await cdp.send("WebAuthn.getCredentials", {
+      authenticatorId,
+    });
+    assert.equal(credentials.length, 1);
+    assert.equal(credentials[0].isResidentCredential, true);
+    checks.push(
+      "ブラウザの仮想認証器にdiscoverableパスキーが保存されたことを確認",
+    );
+  }
 
   const assertionsBeforeTest = assertions;
   await page.getByRole("button", { name: "認証を試す", exact: true }).click();
   await expect(page.locator(".toast[role='status']")).toContainText(
-    "デバイス認証を確認できました",
+    passkeys ? "パスキーで認証できました" : "デバイス認証を確認できました",
   );
   await expect.poll(() => assertions).toBeGreaterThan(assertionsBeforeTest);
   const testPolicies = await page.evaluate(() =>
@@ -184,18 +286,31 @@ try {
     element.scrollTop = 0;
   });
   await page.screenshot({
-    path: "test-results/galaxy-security.png",
+    path: passkeys
+      ? "test-results/passkeys-settings.png"
+      : "test-results/galaxy-security.png",
     fullPage: false,
   });
+  if (passkeys) {
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.screenshot({
+      path: "test-results/passkeys-settings-dark.png",
+      fullPage: false,
+    });
+    await page.emulateMedia({ colorScheme: "light" });
+  }
 
   await page.reload();
   await expect(page.locator(".lock-screen")).toBeVisible();
   await expect(page.locator(".bottom-nav")).toHaveCount(0);
+  if (passkeys)
+    await page.screenshot({
+      path: "test-results/passkeys-lock.png",
+      fullPage: false,
+    });
   await verifyMobileWidths(page, "galaxy-lock-screen");
   const assertionsBeforeUnlock = assertions;
-  await page
-    .getByRole("button", { name: "デバイスで認証", exact: true })
-    .click();
+  await page.getByRole("button", { name: unlockLabel, exact: true }).click();
   await expect(page.locator(".bottom-nav")).toBeVisible();
   await expect.poll(() => assertions).toBeGreaterThan(assertionsBeforeUnlock);
   const unlockPolicies = await page.evaluate(() =>
@@ -235,9 +350,7 @@ try {
     await expect(page.locator(".lock-screen")).toBeVisible();
     await expect(page.locator(".bottom-nav")).toHaveCount(0);
     const assertionsBeforeOfflineUnlock = assertions;
-    await page
-      .getByRole("button", { name: "デバイスで認証", exact: true })
-      .click();
+    await page.getByRole("button", { name: unlockLabel, exact: true }).click();
     await expect(page.locator(".bottom-nav")).toBeVisible();
     const blockedUncachedRequest = await page.evaluate(async (path) => {
       try {
@@ -274,6 +387,8 @@ try {
     checks.push("本番PWAをオフラインで再読込し、仮想platform認証器で解除");
     await context.setOffline(false);
   }
+  assert.deepEqual(await financialSnapshot(), originalData);
+  checks.push("認証の登録・試行・再起動後もIndexedDBの全ストアの内容が一致");
   await context.close();
 
   const unsupportedContext = await browser.newContext(androidOptions);
@@ -293,6 +408,9 @@ try {
   await openLockSettings(unsupportedPage);
   await expect(
     unsupportedPage.getByRole("button", { name: "デバイス認証", exact: true }),
+  ).toBeDisabled();
+  await expect(
+    unsupportedPage.getByRole("button", { name: "パスキー", exact: true }),
   ).toBeDisabled();
   await expect(
     unsupportedPage.getByText(/利用できる端末の認証が見つかりません/),
@@ -345,6 +463,7 @@ try {
 } finally {
   const result = {
     passed,
+    passkeys,
     offlineRequested,
     offlineEvidence,
     checks,
@@ -354,7 +473,7 @@ try {
     ...(failure ? { failure } : {}),
   };
   await fs.writeFile(
-    "test-results/webauthn-results.json",
+    `test-results/${resultPrefix}-results.json`,
     JSON.stringify(result, null, 2),
   );
   console.log(JSON.stringify(result, null, 2));

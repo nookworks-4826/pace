@@ -7,6 +7,8 @@ import {
   isDeviceAuthAvailable,
   checkDeviceAuthSupport,
   registerDeviceAuth,
+  registerPasskey,
+  isPasskeyRegistered,
   derToRawSignature,
   verifyDeviceAuth,
 } from "../domain/security";
@@ -214,6 +216,7 @@ async function enrollingAuthenticator(
     assertionFlags?: number;
     signCount?: number;
     registrationFlags?: number;
+    residentKey?: boolean;
   } = {},
 ) {
   const flags = options.assertionFlags ?? 0x05;
@@ -294,6 +297,11 @@ async function enrollingAuthenticator(
       return true;
     }
     rawId = credentialId.buffer;
+    getClientExtensionResults() {
+      return options.residentKey === undefined
+        ? {}
+        : { credProps: { rk: options.residentKey } };
+    }
     constructor(public response: Attestation | Assertion) {}
   }
   let creation: PublicKeyCredentialCreationOptions | undefined;
@@ -381,6 +389,96 @@ async function enrollingAuthenticator(
 }
 
 describe("platform credential enrollment and Android-style assertions", () => {
+  it("requires a discoverable passkey with user verification and verifies it with the existing trusted-key flow", async () => {
+    const authenticator = await enrollingAuthenticator({
+      residentKey: true,
+      assertionFlags: 0x1d,
+    });
+    await registerPasskey();
+    expect(authenticator.getCreation()).toMatchObject({
+      authenticatorSelection: {
+        authenticatorAttachment: "platform",
+        residentKey: "required",
+        requireResidentKey: true,
+        userVerification: "required",
+      },
+      extensions: { credProps: true },
+    });
+    expect(isPasskeyRegistered()).toBe(true);
+    const config = getLockConfig();
+    expect(config.kind).toBe("device");
+    expect(Object.keys(config).sort()).toEqual(
+      [
+        "kind",
+        "credentialId",
+        "publicKey",
+        "rpId",
+        "origin",
+        "signCount",
+      ].sort(),
+    );
+    expect(await verifyDeviceAuth()).toBe(true);
+    expect(await verifyDeviceAuth()).toBe(true);
+    // A lost display label must not change the trusted key or block authentication.
+    items.delete("pace:passkey-label:v1");
+    expect(isPasskeyRegistered()).toBe(false);
+    expect(getLockConfig()).toEqual(config);
+    expect(await verifyDeviceAuth()).toBe(true);
+  });
+  it("accepts an omitted optional credProps response while still requiring a resident key", async () => {
+    const authenticator = await enrollingAuthenticator();
+    await registerPasskey();
+    expect(
+      authenticator.getCreation()?.authenticatorSelection?.residentKey,
+    ).toBe("required");
+    expect(isPasskeyRegistered()).toBe(true);
+  });
+  it("rejects an explicit nonresident result without replacing the existing PIN", async () => {
+    await setPin("135790");
+    const original = getLockConfig();
+    await enrollingAuthenticator({ residentKey: false });
+    await expect(registerPasskey()).rejects.toThrow("パスキーを保存できません");
+    expect(getLockConfig()).toEqual(original);
+    expect(isPasskeyRegistered()).toBe(false);
+    expect(await verifyPin("135790")).toBe(true);
+  });
+  it("preserves an existing device credential on canceled passkey registration", async () => {
+    await enrollingAuthenticator();
+    await registerDeviceAuth();
+    const original = getLockConfig();
+    vi.spyOn(navigator.credentials, "create").mockRejectedValue(
+      new DOMException("Canceled", "NotAllowedError"),
+    );
+    await expect(registerPasskey()).rejects.toThrow("変更していません");
+    expect(getLockConfig()).toEqual(original);
+    expect(await verifyDeviceAuth()).toBe(true);
+  });
+  it("rejects a passkey without user verification and keeps the former passkey label and lock", async () => {
+    await enrollingAuthenticator({ residentKey: true });
+    await registerPasskey();
+    const original = new Map(items);
+    await enrollingAuthenticator({
+      residentKey: true,
+      registrationFlags: 0x41,
+    });
+    await expect(registerPasskey()).rejects.toThrow("本人確認");
+    expect(items).toEqual(original);
+  });
+  it("clears only the display label when replacing a passkey with PIN, legacy device auth or no lock", async () => {
+    await enrollingAuthenticator({ residentKey: true });
+    await registerPasskey();
+    await setPin("135790");
+    expect(isPasskeyRegistered()).toBe(false);
+    expect(await verifyPin("135790")).toBe(true);
+    await registerPasskey();
+    await registerDeviceAuth();
+    expect(isPasskeyRegistered()).toBe(false);
+    expect(await verifyDeviceAuth()).toBe(true);
+    await registerPasskey();
+    disableLock();
+    expect(isPasskeyRegistered()).toBe(false);
+    expect(getLockConfig().kind).toBe("none");
+  });
   it("enrolls the real CBOR public key using platform UV-required ES256 and verifies repeated zero-counter assertions", async () => {
     const authenticator = await enrollingAuthenticator();
     await registerDeviceAuth();

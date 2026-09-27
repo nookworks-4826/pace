@@ -1,5 +1,6 @@
 import type { Category, MerchantCategoryRule, PaymentMethod } from "../types";
 import { MAX_MONEY } from "./finance";
+import { predictCategoryPattern } from "./categoryLearning";
 
 export function normalizeMerchant(value: string): string {
   return value
@@ -15,7 +16,7 @@ export interface CategorySuggestion {
   categoryId: string;
   subcategoryId: string;
   confidence: "high" | "medium" | "low";
-  source: "learned" | "keyword" | "similar" | "none";
+  source: "learned" | "keyword" | "similar" | "pattern" | "none";
   label: string;
 }
 
@@ -230,6 +231,16 @@ export function suggestCategory(
       candidates[0].rule.categoryId === candidates[1].rule.categoryId)
   )
     return fromRule(candidates[0].rule, "similar");
+  const pattern = predictCategoryPattern(normalized, validRules);
+  const category = activeCategories.find((row) => row.id === pattern);
+  if (category)
+    return {
+      categoryId: category.id,
+      subcategoryId: "",
+      confidence: "medium",
+      source: "pattern",
+      label: category.name,
+    };
   return none;
 }
 

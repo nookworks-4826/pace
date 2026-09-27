@@ -56,7 +56,7 @@ const server = createServer(async (request, response) => {
   }
 });
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-const base = `http://127.0.0.1:${server.address().port}/pace/`;
+const base = `http://localhost:${server.address().port}/pace/`;
 let browser;
 const results = [];
 try {
@@ -97,8 +97,8 @@ try {
       .click();
     await page.getByRole("dialog").waitFor({ state: "hidden" });
   };
-  const snapshot = () =>
-    page.evaluate(async () => {
+  const snapshot = (target = page) =>
+    target.evaluate(async () => {
       const db = await new Promise((resolve, reject) => {
         const request = indexedDB.open("pace");
         request.onsuccess = () => resolve(request.result);
@@ -318,6 +318,90 @@ try {
   results.push(
     "別タブで更新しても入力中のタブは再読み込みせず、閉じてから更新可能",
   );
+  // Optional: the previous build must already support passkeys (v1.2.0+).
+  if (process.env.PACE_QA_UPDATE_PASSKEY === "1") {
+    await context.close();
+    release = 0;
+    const authContext = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      reducedMotion: "reduce",
+    });
+    authContext.on("request", (request) => {
+      if (!request.url().startsWith(base) && !request.url().startsWith("data:"))
+        externalRequests.push(request.url());
+    });
+    const authPage = await authContext.newPage();
+    authPage.on("pageerror", (error) => errors.push(error.message));
+    const cdp = await authContext.newCDPSession(authPage);
+    await cdp.send("WebAuthn.enable");
+    await cdp.send("WebAuthn.addVirtualAuthenticator", {
+      options: {
+        protocol: "ctap2",
+        transport: "internal",
+        hasResidentKey: true,
+        hasUserVerification: true,
+        isUserVerified: true,
+        automaticPresenceSimulation: true,
+      },
+    });
+    await authPage.goto(base);
+    await authPage.getByRole("button", { name: "設定をあとで行う" }).click();
+    await authPage.evaluate(() =>
+      navigator.serviceWorker.ready.then(() => true),
+    );
+    await authPage.reload();
+    await authPage.waitForFunction(
+      () => navigator.serviceWorker.controller !== null,
+    );
+    await authPage.goto(`${base}#/settings`);
+    await authPage
+      .getByRole("button", { name: "アプリロック", exact: true })
+      .click();
+    await authPage
+      .getByRole("button", { name: "パスキー", exact: true })
+      .click();
+    await authPage
+      .getByRole("button", { name: "パスキーを登録", exact: true })
+      .click();
+    await authPage.getByText("現在：パスキー", { exact: true }).waitFor();
+    await authPage.getByRole("button", { name: "閉じる", exact: true }).click();
+    const authBefore = await snapshot(authPage);
+    const verifyAuthPreserved = (after, successfulAssertions) => {
+      const expected = structuredClone(authBefore);
+      const key = "pace:local-lock:v1";
+      const lock = JSON.parse(expected.storage[key]);
+      // A successful authentication advances the virtual authenticator's replay
+      // counter. All keys, identity metadata and financial stores must be equal.
+      lock.signCount += successfulAssertions;
+      expected.storage[key] = JSON.stringify(lock);
+      assert.deepEqual(after, expected);
+    };
+    release = 4;
+    await authPage.evaluate(async () =>
+      (await navigator.serviceWorker.getRegistration()).update(),
+    );
+    await authPage
+      .locator(".update-banner")
+      .getByRole("button", { name: "更新する", exact: true })
+      .click();
+    await authPage
+      .getByRole("button", { name: "パスキーで解除", exact: true })
+      .click();
+    await authPage
+      .getByText(`現在のバージョン ${version}`, { exact: true })
+      .waitFor();
+    verifyAuthPreserved(await snapshot(authPage), 1);
+    await authContext.setOffline(true);
+    await authPage.reload();
+    await authPage
+      .getByRole("button", { name: "パスキーで解除", exact: true })
+      .click();
+    await authPage.locator(".bottom-nav").waitFor();
+    verifyAuthPreserved(await snapshot(authPage), 2);
+    results.push(
+      "旧版で登録したパスキーを更新後とオフライン再起動後に使用、全DBとロック設定一致（仮想認証器）",
+    );
+  }
   assert.deepEqual(errors, []);
   assert.deepEqual(externalRequests, []);
   await writeFile(
@@ -327,9 +411,18 @@ try {
   console.log(JSON.stringify({ results, errors, externalRequests }, null, 2));
 } catch (error) {
   await mkdir("test-results", { recursive: true });
-  for (const [index, page] of (browser?.contexts()[0]?.pages() || []).entries()) {
-    await page.screenshot({ path: `test-results/update-error-${index}.png`, fullPage: true });
-    console.error("Failed update screen", index, (await page.locator("body").innerText()).slice(-1800));
+  for (const [index, page] of (
+    browser?.contexts()[0]?.pages() || []
+  ).entries()) {
+    await page.screenshot({
+      path: `test-results/update-error-${index}.png`,
+      fullPage: true,
+    });
+    console.error(
+      "Failed update screen",
+      index,
+      (await page.locator("body").innerText()).slice(-1800),
+    );
   }
   throw error;
 } finally {

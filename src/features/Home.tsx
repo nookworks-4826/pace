@@ -12,6 +12,7 @@ import {
   Plus,
   Settings2,
   ShieldCheck,
+  Sun,
   Target,
   Wallet,
 } from "lucide-react";
@@ -29,12 +30,15 @@ import { APP_NAME } from "../types";
 import { FinanceEditor } from "./Management";
 import type { Editor } from "./Management";
 import { ExpenseRow } from "./History";
+import { SpendingPreview } from "./SpendingPreview";
+import { moneyAllocation } from "../domain/spendingPreview";
 
 export function Home() {
   const { data, finance: f, today, openExpense, run } = usePace();
   const navigate = useNavigate();
   const [details, setDetails] = useState(false);
   const [editor, setEditor] = useState<Editor | null>(null);
+  const allocation = moneyAllocation(f);
   const negative = f.safeToSpend !== null && f.safeToSpend < 0;
   const attention = !negative && f.pace.ratio !== null && f.pace.ratio > 1.25;
   const remainingDays =
@@ -177,13 +181,27 @@ export function Home() {
           {APP_NAME}
           <span className="brand-dot" />
         </Link>
-        <Link to="/settings" className="icon-button" aria-label="設定">
-          <Settings2 size={22} />
-        </Link>
+        <div className="home-actions">
+          {data.settings.colorMode !== "light" && (
+            <button
+              className="icon-button tinted"
+              aria-label="明るい表示にする"
+              title="明るい表示にする"
+              onClick={() =>
+                void run(() => updateSettings({ colorMode: "light" }))
+              }
+            >
+              <Sun size={22} />
+            </button>
+          )}
+          <Link to="/settings" className="icon-button" aria-label="設定">
+            <Settings2 size={22} />
+          </Link>
+        </div>
       </header>
       <div className="greeting">
         <div>
-          <p className="eyebrow">YOUR DAILY PACE</p>
+          <p className="eyebrow">TODAY, AT YOUR PACE</p>
           <h1>{dateLabel}</h1>
         </div>
         <span className="private-label">
@@ -209,6 +227,7 @@ export function Home() {
           <>
             <div
               className="hero-amount"
+              key={f.safeToSpend}
               style={
                 yen(Math.max(0, f.safeToSpend)).length > 10
                   ? { fontSize: "clamp(1.35rem,6.8vw,2.8rem)" }
@@ -228,6 +247,23 @@ export function Home() {
                     : "予定のお金を確保しています"}
             </div>
           </>
+        )}
+        {allocation && f.liquidBalance !== null && f.liquidBalance > 0 && (
+          <div className="money-allocation">
+            <div className="money-allocation-track" aria-hidden="true">
+              <span style={{ width: `${allocation.freeRatio * 100}%` }} />
+            </div>
+            <div className="money-allocation-labels">
+              <span>
+                <i />
+                使える分
+              </span>
+              <span>
+                <i />
+                予定・未払い分
+              </span>
+            </div>
+          </div>
         )}
         <div className="hero-footer">
           <span>持っているお金</span>
@@ -325,6 +361,7 @@ export function Home() {
           </button>
         </div>
       )}
+      <SpendingPreview />
       {f.todaySpent === 0 &&
         !data.dailyCheckIns.find(
           (c) => c.date === today && c.noSpendingConfirmed,
