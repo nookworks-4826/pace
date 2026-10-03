@@ -1,4 +1,3 @@
-import Dexie from "dexie";
 import { db, type PaceDatabase } from "../db";
 import {
   decryptPayload,
@@ -78,16 +77,15 @@ export async function initializeVault(
       database.vaultSession.migrating = true;
       for (let position = 0; position < tables.length; position++) {
         await tables[position].clear();
-        // Keep encryption work inside the same transaction; no half-migrated state can commit.
+        // The middleware keeps only crypto work alive; database requests stay
+        // in this transaction so no half-migrated state can commit.
         for (let offset = 0; offset < rows[position].length; offset += 100)
-          await Dexie.waitFor(
-            tables[position].bulkPut(
-              rows[position].slice(offset, offset + 100),
-            ),
+          await tables[position].bulkPut(
+            rows[position].slice(offset, offset + 100),
           );
         // Read the encrypted rows back before commit. A failed round trip aborts
         // every table, leaving the complete legacy database intact.
-        const restored = await Dexie.waitFor(tables[position].toArray());
+        const restored = await tables[position].toArray();
         const original = rows[position]
           .map((row) => JSON.stringify(row))
           .sort();
