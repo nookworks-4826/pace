@@ -12,6 +12,7 @@ import {
 
 const databases: PaceDatabase[] = [];
 const phrase = "an independent local vault secret";
+const NativePromise = globalThis.Promise;
 const stamp = {
   createdAt: "2026-10-03T10:00:00.000Z",
   updatedAt: "2026-10-03T10:00:00.000Z",
@@ -70,6 +71,43 @@ afterEach(async () => {
 });
 
 describe("encrypted IndexedDB vault", () => {
+  it("keeps coherent reads and updates active when crypto finishes in different orders", async () => {
+    const instance = database();
+    await seed(instance);
+    await initializeVault(phrase, instance);
+    const decrypt = crypto.subtle.decrypt.bind(crypto.subtle);
+    vi.spyOn(crypto.subtle, "decrypt").mockImplementation((...args) => {
+      const algorithm = args[0] as AesGcmParams;
+      const context = algorithm.additionalData
+        ? new TextDecoder().decode(algorithm.additionalData as ArrayBuffer)
+        : "";
+      return decrypt(...args).then(
+        (value) =>
+          new NativePromise<ArrayBuffer>((resolve) =>
+            setTimeout(
+              () => resolve(value),
+              context.includes('"expenses"') ? 80 : 5,
+            ),
+          ),
+      );
+    });
+    await instance.transaction("rw", instance.tables, async () => {
+      const [savedExpense, settings, emptyAccounts] = await Promise.all([
+        instance.expenses.get(expense.id),
+        instance.settings.get("main"),
+        instance.accounts.toArray(),
+      ]);
+      expect(savedExpense).toEqual(expense);
+      expect(settings).toEqual(defaultSettings);
+      expect(emptyAccounts).toEqual([]);
+      await instance.expenses.update(expense.id, { amount: 910 });
+      expect((await instance.expenses.get(expense.id))?.amount).toBe(910);
+    });
+    expect((await instance.expenses.get(expense.id))?.amount).toBe(910);
+    const persisted = (await rawRows(instance, "expenses"))[0];
+    expect(persisted.__paceVault).toBe(1);
+    expect(JSON.stringify(persisted)).not.toContain(expense.merchant);
+  });
   it("upgrades a real legacy version 2 database before configuring the vault", async () => {
     const name = `pace-vault-upgrade-${crypto.randomUUID()}`;
     const model = database();
