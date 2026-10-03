@@ -120,15 +120,21 @@ it("rejects a pre-reset sync even if a new connection has the same id", async ()
   expect(await db.syncStates.get(connection.id)).toBeUndefined();
   expect((await readAppData()).externalTransactions).toHaveLength(0);
 });
-it("is idempotent and does not subtract imported purchases from a provider snapshot twice", async () => {
+it("is idempotent and does not subtract imported purchases from a provider snapshot twice", async ({ onTestFailed }) => {
+  let stage = "initial import";
+  onTestFailed(() => console.error(`Financial sync stopped during: ${stage}`));
   await syncFinancialConnection(provider, connection);
+  stage = "first coherent snapshot";
   let data = await readAppData();
   expect(data.expenses).toHaveLength(1);
   expect(computeFinance(data).liquidBalance).toBe(9000);
+  stage = "reset refresh attempt";
   await db.syncStates.update(connection.id, {
     lastAttemptAt: "2000-01-01T00:00:00Z",
   });
+  stage = "repeat import";
   await syncFinancialConnection(provider, connection);
+  stage = "second coherent snapshot";
   data = await readAppData();
   expect(data.expenses).toHaveLength(1);
   expect(data.externalTransactions).toHaveLength(1);
