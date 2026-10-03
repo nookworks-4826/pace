@@ -158,9 +158,12 @@ it("keeps a manually merged purchase when imported history is removed", async ()
   await db.financialConnections.put(connection);
 });
 it("does not resurrect a disconnected connection after an in-flight response", async () => {
-  await db.syncStates.update(connection.id, {
-    lastAttemptAt: "2000-01-01T00:00:00Z",
-  });
+  const isolatedConnection = {
+    ...connection,
+    id: "fictional-in-flight-disconnect",
+  };
+  await db.financialConnections.put(isolatedConnection);
+  await db.syncStates.delete(isolatedConnection.id);
   const delayed = new MockFinancialProvider();
   let release: () => void = () => {};
   const gate = new Promise<void>((resolve) => {
@@ -175,14 +178,30 @@ it("does not resurrect a disconnected connection after an in-flight response", a
     await gate;
     return [];
   };
-  const syncing = syncFinancialConnection(delayed, connection);
+  const syncing = syncFinancialConnection(delayed, isolatedConnection);
   const captured = syncing.catch((e) => e);
-  await started;
-  await disconnectFinancialConnection(delayed, connection.id, true);
-  release();
+  try {
+    // An early rejection must fail the test instead of waiting forever for a
+    // provider request that never started. Always release an in-flight request.
+    await Promise.race([
+      started,
+      captured.then((result) => {
+        throw result instanceof Error
+          ? result
+          : new Error("The sync completed before the delayed request started");
+      }),
+    ]);
+    await disconnectFinancialConnection(delayed, isolatedConnection.id, true);
+  } finally {
+    release();
+    await captured;
+  }
   expect(await captured).toBeInstanceOf(Error);
   const data = await readAppData();
-  expect(data.financialConnections?.[0].status).toBe("disconnected");
+  expect(
+    data.financialConnections?.find((entry) => entry.id === isolatedConnection.id)
+      ?.status,
+  ).toBe("disconnected");
   expect(data.expenses).toHaveLength(0);
   expect(data.externalTransactions).toHaveLength(0);
 }, 15000);

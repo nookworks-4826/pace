@@ -26,6 +26,12 @@ jobs:
       - run: npm ci
       - run: npm run test
       - run: npm run build
+        env:
+          VITE_MONEYTREE_CLIENT_ID: ${{ vars.VITE_MONEYTREE_CLIENT_ID }}
+          VITE_MONEYTREE_REDIRECT_URI: ${{ vars.VITE_MONEYTREE_REDIRECT_URI }}
+          VITE_MONEYTREE_ENVIRONMENT: ${{ vars.VITE_MONEYTREE_ENVIRONMENT }}
+          VITE_MONEYTREE_BROWSER_ACCESS_CONFIRMED: ${{ vars.VITE_MONEYTREE_BROWSER_ACCESS_CONFIRMED }}
+      - run: npm run privacy:audit
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
