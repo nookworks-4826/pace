@@ -58,5 +58,10 @@ export default defineConfig({
     }),
   ],
   build: { target: "es2022", chunkSizeWarningLimit: 1500 },
-  test: { environment: "node", include: ["src/tests/**/*.test.ts"] },
+  test: {
+    environment: "node",
+    include: ["src/tests/**/*.test.ts"],
+    // Bound crypto/XLSX worker contention on machines with many logical CPUs.
+    maxWorkers: 4,
+  },
 });
