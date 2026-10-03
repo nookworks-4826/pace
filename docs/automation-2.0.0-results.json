@@ -1,0 +1,321 @@
+{
+  "version": "2.0.0",
+  "unitTests": {
+    "files": 16,
+    "passed": 229,
+    "failed": 0
+  },
+  "build": {
+    "passed": true,
+    "strictTypeScript": true,
+    "pwaPrecachedAssets": 24
+  },
+  "publicDeploymentPerformed": false,
+  "realFinancialConnectionVerified": false,
+  "realIOSAndGalaxyDevicesVerified": false,
+  "scope": "Fictional fixtures in isolated browser contexts; no real user records or credentials.",
+  "financial": {
+    "checks": [
+      "Encrypted vault starts with fictional data and preserves account source of truth",
+      "Actual salary, bank transfer, ATM, cash, Suica, PayPay, card top-up and settlement avoid double counting",
+      "Forecast salary is not money; deferred family debt becomes reserved only after repayment is enabled",
+      "Repeated import and pending-to-posted update keep one expense; recurring costs release their reserve",
+      "A manual duplicate remains until the user explicitly merges it; category and memo survive",
+      "Receipt image review fallback creates one cash expense and stores no image by default",
+      "A new card suggests payment day 10 and requires its real closing day",
+      "An archived account still protects its linked card against deletion and broken backup references",
+      "Purchase preview changes only the displayed result and never books a transaction",
+      "Analysis toggles between the true calendar month and the current salary cycle",
+      "Home, money, sync, analysis, history, timeline, debt and income fit 375/390/430/768px in light and dark modes",
+      "Account, financial transaction, receipt and salary data are absent from plaintext IndexedDB/localStorage/sessionStorage; no external requests"
+    ],
+    "errors": [],
+    "overflows": [],
+    "foreignRequests": [],
+    "privacy": {
+      "leaks": [],
+      "vaultMetadataPresent": true,
+      "externalTransactionStorePresent": true
+    },
+    "screenshots": "screenshots/financial-*"
+  },
+  "privacy": {
+    "generatedAt": "2026-10-03T10:39:57.108Z",
+    "passed": true,
+    "checks": [
+      {
+        "name": "Runtime source excludes plaintext browser storage, console output and client secrets",
+        "passed": true,
+        "sourceFiles": 57,
+        "publicMetadataStorage": [
+          "src/domain/security.ts"
+        ],
+        "networkCallSites": [
+          "src/providers/moneytree/index.ts"
+        ]
+      },
+      {
+        "name": "Moneytree API restricts token destination and disables browser response caching",
+        "passed": true
+      },
+      {
+        "name": "Service Worker caches static app/OCR assets only; receipt image saving is explicit and OCR remains local",
+        "passed": true
+      },
+      {
+        "name": "Atomic legacy migration decrypts every seeded financial record and draft unchanged",
+        "passed": true
+      },
+      {
+        "name": "Native IndexedDB inspection: every non-metadata store is encrypted; every persisted index is blinded",
+        "passed": true,
+        "tableCounts": {
+          "expenses": 1,
+          "incomes": 1,
+          "cards": 1,
+          "cardPayments": 1,
+          "debts": 1,
+          "repayments": 1,
+          "recurringExpenses": 1,
+          "recurringOccurrences": 1,
+          "savingsGoals": 1,
+          "savingsContributions": 1,
+          "budgets": 1,
+          "settings": 1,
+          "merchantRules": 1,
+          "categories": 11,
+          "balanceAdjustments": 1,
+          "dailyCheckIns": 1,
+          "favorites": 1,
+          "drafts": 1,
+          "accounts": 2,
+          "transfers": 1,
+          "financialConnections": 1,
+          "externalTransactions": 1,
+          "syncStates": 1,
+          "receipts": 1,
+          "salaryRules": 1,
+          "financialAudits": 1,
+          "accountAdjustments": 1,
+          "providerCredentials": 1,
+          "vaultMeta": 1
+        }
+      },
+      {
+        "name": "Fresh IVs, locked-tab rejection, key disposal and wrong-passphrase preservation",
+        "passed": true
+      },
+      {
+        "name": "Schema 1 compatibility, schema 2 round trip and encrypted export; provider credentials excluded",
+        "passed": true
+      },
+      {
+        "name": "Injected migration failure leaves all legacy records intact and the vault disabled",
+        "passed": true
+      },
+      {
+        "name": "Mock/manual and unconfigured Moneytree adapters perform zero network requests or credential writes",
+        "passed": true,
+        "networkRequests": 0
+      }
+    ],
+    "scope": "Runtime source review and disposable fake IndexedDB with fictional fixtures; not a penetration test or device-storage recovery guarantee."
+  },
+  "update": {
+    "previous": "1.3.0",
+    "current": "2.0.0",
+    "projectBase": "/pace/",
+    "legacyPinVerifiedBeforeMigration": true,
+    "allLegacyTablesEqualAfterIndependentDecryption": true,
+    "plaintextAbsent": true,
+    "pinConfigurationPreserved": true,
+    "draftPreserved": true,
+    "offlineVaultAndPinUnlock": true,
+    "encryptedAppUpdatePreservesData": true,
+    "updateGuardWhileEditing": true,
+    "externalRequests": 0,
+    "pageErrors": 0
+  },
+  "receipts": {
+    "realOCR": true,
+    "japaneseAndEnglish": true,
+    "editableCandidate": true,
+    "explicitApplyNoAutoBooking": true,
+    "imageDefaultOff": true,
+    "imageExplicitOptInEncryptedJPEG": true,
+    "cancellation": true,
+    "timeout": true,
+    "offlineWithCachedModels": true,
+    "noExternalRequests": true,
+    "basePath": "/pace/",
+    "pageErrors": 0
+  },
+  "offline": {
+    "offlineReload": true,
+    "expensePersisted": true,
+    "allRoutes": true,
+    "excelExport": true,
+    "externalRequests": [],
+    "errors": [],
+    "cachedAssets": 19,
+    "manifestCached": true
+  },
+  "passkeys": {
+    "passed": true,
+    "passkeys": true,
+    "offlineRequested": false,
+    "checks": [
+      "誤ったPINでは登録不可。正しいPINで確認後の登録キャンセルでも以前のPIN設定を保持",
+      "Android mobile環境でplatform認証器を登録（userVerification: required）",
+      "ブラウザの仮想認証器にdiscoverableパスキーが保存されたことを確認",
+      "設定内の『認証を試す』で署名検証と成功表示を確認",
+      "再読込時はロックされ、platform認証の成功後だけ解除",
+      "認証の登録・試行・再起動後もIndexedDBの全ストアの内容が一致",
+      "platform認証器を利用できない場合も6桁PINを設定し、再読込後にPINで解除"
+    ],
+    "layoutChecks": [
+      {
+        "scenario": "galaxy-security-settings",
+        "width": 360,
+        "passed": true
+      },
+      {
+        "scenario": "galaxy-security-settings",
+        "width": 375,
+        "passed": true
+      },
+      {
+        "scenario": "galaxy-security-settings",
+        "width": 390,
+        "passed": true
+      },
+      {
+        "scenario": "galaxy-security-settings",
+        "width": 430,
+        "passed": true
+      },
+      {
+        "scenario": "galaxy-security-settings",
+        "width": 768,
+        "passed": true
+      },
+      {
+        "scenario": "galaxy-lock-screen",
+        "width": 360,
+        "passed": true
+      },
+      {
+        "scenario": "galaxy-lock-screen",
+        "width": 375,
+        "passed": true
+      },
+      {
+        "scenario": "galaxy-lock-screen",
+        "width": 390,
+        "passed": true
+      },
+      {
+        "scenario": "galaxy-lock-screen",
+        "width": 430,
+        "passed": true
+      },
+      {
+        "scenario": "galaxy-lock-screen",
+        "width": 768,
+        "passed": true
+      },
+      {
+        "scenario": "galaxy-pin-fallback",
+        "width": 360,
+        "passed": true
+      },
+      {
+        "scenario": "galaxy-pin-fallback",
+        "width": 375,
+        "passed": true
+      },
+      {
+        "scenario": "galaxy-pin-fallback",
+        "width": 390,
+        "passed": true
+      },
+      {
+        "scenario": "galaxy-pin-fallback",
+        "width": 430,
+        "passed": true
+      },
+      {
+        "scenario": "galaxy-pin-fallback",
+        "width": 768,
+        "passed": true
+      }
+    ],
+    "errors": [],
+    "limitation": "Androidの画面・User-Agentとvirtual CTAP2 internal認証器を使ったChromeのブラウザQAです。Galaxy実機の指紋センサー、Samsung Pass、Samsung Internet、実際のiPhone/Safari/Face ID/Touch IDやプロバイダー間の同期を検証した結果ではありません。"
+  },
+  "flows": {
+    "results": [
+      "残高未入力→支出→現在残高照合",
+      "カード購入5000→引落5000、二重計上なし",
+      "借入登録→返済、確保額を解放",
+      "貯金目標→移動、確保額を解放",
+      "固定費登録→確定、二重計上なし",
+      "カード→現金・金額編集（支払超過表示対象）",
+      "支出削除→Undo",
+      "JSON出力→検証プレビュー→復元",
+      "PIN設定→再起動→認証解除"
+    ],
+    "errors": []
+  },
+  "layout": {
+    "checks": [
+      "375px:8画面横スクロール検査",
+      "390px:8画面横スクロール検査",
+      "430px:8画面横スクロール検査",
+      "768px:8画面横スクロール検査",
+      "1024px:8画面横スクロール検査",
+      "375px:支出シート・クイック入力・下書き保持",
+      "ダークモード:ホーム・分析",
+      "不足・12桁金額・長い店舗名",
+      "5,024件:最初のDOM60件、遷移1423ms",
+      "12桁の正の残高・今日の目安も横スクロールなし"
+    ],
+    "errors": [],
+    "overflows": []
+  },
+  "exports": {
+    "passed": true,
+    "browser": "Chromium",
+    "exports": [
+      {
+        "extension": ".json",
+        "bytes": 7585,
+        "downloaded": true
+      },
+      {
+        "extension": ".csv",
+        "bytes": 314,
+        "downloaded": true
+      },
+      {
+        "extension": ".xlsx",
+        "bytes": 16867,
+        "downloaded": true
+      }
+    ],
+    "schema2JsonRoundTrip": true,
+    "excelSheets": 12,
+    "numericAmountRetained": true,
+    "formulaCellsAreText": true,
+    "pageErrors": 0,
+    "externalRequests": 0,
+    "scope": "Isolated browser context with fictional records; no user profile or account was used."
+  },
+  "uiSuiteSmoke": {
+    "passed": true,
+    "actualVaultGate": true,
+    "isolatedDependencyCache": true,
+    "pageErrors": 0,
+    "externalRequests": 0
+  }
+}

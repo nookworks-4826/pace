@@ -4,7 +4,7 @@ import { makeBackupObject, validateBackup } from "./schema";
 export { buildCSV, buildExcel } from "./export";
 export { validateData } from "./schema";
 
-const ITERATIONS = 310_000;
+const ITERATIONS = 600_000;
 const MAX_FILE_CHARS = 70_000_000;
 const encoder = new TextEncoder();
 const encryptedSchema = z

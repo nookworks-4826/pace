@@ -1,3 +1,4 @@
+import { installVaultSupport } from './qa-vault-support.mjs';
 import { chromium } from "playwright";
 import fs from "node:fs/promises";
 import assert from "node:assert/strict";
@@ -19,6 +20,7 @@ const context = await browser.newContext({
   hasTouch: true,
 });
 const page = await context.newPage();
+installVaultSupport(page);
 const errors = [],
   overflows = [],
   checks = [];

@@ -62,6 +62,40 @@ export function Timeline() {
         amount: e.difference,
         planned: false,
       })),
+      ...(data.transfers ?? []).map((transfer) => ({
+        id: `transfer-${transfer.id}`,
+        date: transfer.date,
+        name: `${data.accounts?.find((account) => account.id === transfer.fromAccountId)?.name ?? "振替元"} → ${data.accounts?.find((account) => account.id === transfer.toAccountId)?.name ?? "振替先"}`,
+        type:
+          transfer.status === "reversed"
+            ? "振替 · 取消済み"
+            : "振替 · 生活支出に含まない",
+        amount: transfer.amount,
+        planned: false,
+        isTransfer: true,
+      })),
+      ...(data.externalTransactions ?? [])
+        .filter(
+          (row) => row.kind === "refund" && row.pendingStatus !== "pending",
+        )
+        .map((row) => ({
+          id: `refund-${row.id}`,
+          date: row.date,
+          name: row.description,
+          type: "返金 · 新しい収入に含まない",
+          amount: Math.abs(row.amount),
+          planned: false,
+        })),
+      ...(data.accountAdjustments ?? []).map((row) => ({
+        id: `adjustment-${row.id}`,
+        date: row.date,
+        name:
+          data.accounts?.find((account) => account.id === row.accountId)
+            ?.name ?? "口座残高",
+        type: "残高調整 · 生活支出に含まない",
+        amount: row.newBalance - row.previousBalance,
+        planned: false,
+      })),
     ];
     const planned = [
       ...finance.recurringDue.map((e) => ({
@@ -161,9 +195,11 @@ export function Timeline() {
                   <small>{r.type}</small>
                 </div>
                 <strong className={r.amount > 0 ? "positive" : ""}>
-                  {r.amount === 0 && r.planned
-                    ? "未設定"
-                    : `${r.amount > 0 ? "+" : ""}${yen(r.amount)}`}
+                  {"isTransfer" in r
+                    ? yen(r.amount)
+                    : r.amount === 0 && r.planned
+                      ? "未設定"
+                      : `${r.amount > 0 ? "+" : ""}${yen(r.amount)}`}
                 </strong>
               </div>
             </div>

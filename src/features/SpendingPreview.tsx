@@ -96,7 +96,9 @@ export function SpendingPreview() {
                       <span>
                         {result.daysAfterToday
                           ? "明日からの1日あたり"
-                          : "今月は今日まで"}
+                          : finance.cycle.mode === "salary"
+                            ? "今期は今日まで"
+                            : "今月は今日まで"}
                       </span>
                       <b>
                         {result.tomorrowAllowance === null
@@ -109,7 +111,10 @@ export function SpendingPreview() {
                     result?.budgetAfter !== undefined &&
                     result.budgetAfter < 0 && (
                       <p className="preview-negative">
-                        月予算を {yen(-result.budgetAfter)} 超える見込み
+                        {finance.cycle.mode === "salary"
+                          ? "期間の予算"
+                          : "月予算"}
+                        を {yen(-result.budgetAfter)} 超える見込み
                       </p>
                     )}
                 </div>
@@ -119,7 +124,11 @@ export function SpendingPreview() {
             <details>
               <summary>計算について</summary>
               <p className="hint">
-                登録済みの残高・予定から、この金額を追加で使った場合を計算します。未入力の支払いは含みません。明日からの目安は、購入後の金額と月予算の残りの小さい方を、明日から月末までの日数で割っています。すでに確保している固定費・カード引落・返済・貯金移動には使いません。
+                登録済みの残高・予定から、この金額を追加で使った場合を計算します。未入力の支払いは含みません。明日からの目安は、購入後の金額と
+                {finance.cycle.mode === "salary" ? "期間の予算" : "月予算"}
+                の残りの小さい方を、明日から
+                {finance.cycle.mode === "salary" ? "今期末" : "月末"}
+                までの日数で割っています。すでに確保している固定費・カード引落・返済・貯金移動には使いません。
               </p>
             </details>
           </div>

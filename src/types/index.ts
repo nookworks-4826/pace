@@ -1,4 +1,20 @@
 export type ID = string;
+import type {
+  Account,
+  Transfer,
+  ExternalMetadata,
+  FinancialConnection,
+  ExternalTransaction,
+  SyncState,
+  Receipt,
+  SalaryRule,
+  FinancialAudit,
+  AccountAdjustment,
+  BudgetCycleConfig,
+  ReminderSettings,
+  PaymentChannel,
+} from "./automation.ts";
+export * from "./automation.ts";
 export type PaymentMethod = "cash" | "debit" | "bank" | "creditCard" | "other";
 export interface Stamped {
   id: ID;
@@ -13,7 +29,11 @@ export interface Category {
   subcategories: { id: ID; name: string }[];
   archived?: boolean;
 }
-export interface Expense extends Stamped {
+export interface Expense extends Stamped, ExternalMetadata {
+  externalMergedFromManual?: boolean;
+  sourceAccountId?: ID;
+  paymentChannel?: PaymentChannel;
+  receiptId?: ID;
   amount: number;
   date: string;
   merchant: string;
@@ -26,7 +46,8 @@ export interface Expense extends Stamped {
   isFixedCost: boolean;
   recurringOccurrenceId?: ID;
 }
-export interface Income extends Stamped {
+export interface Income extends Stamped, ExternalMetadata {
+  sourceAccountId?: ID;
   amount: number;
   date: string;
   source: string;
@@ -43,12 +64,14 @@ export interface CreditCard extends Stamped {
   isActive: boolean;
 }
 export interface CardPayment extends Stamped {
+  sourceAccountId?: ID;
   creditCardId: ID;
   amount: number;
   date: string;
   memo: string;
 }
 export interface Debt extends Stamped {
+  reserveForCurrentBudget?: boolean;
   lenderName: string;
   title: string;
   originalAmount: number;
@@ -63,6 +86,9 @@ export interface Debt extends Stamped {
   status: "active" | "paid";
 }
 export interface DebtRepayment {
+  createdAt?: string;
+  updatedAt?: string;
+  sourceAccountId?: ID;
   id: ID;
   debtId: ID;
   amount: number;
@@ -81,6 +107,9 @@ export interface SavingsGoal {
   completedAt?: string;
 }
 export interface SavingsContribution {
+  createdAt?: string;
+  updatedAt?: string;
+  sourceAccountId?: ID;
   id: ID;
   savingsGoalId: ID;
   amount: number;
@@ -88,6 +117,7 @@ export interface SavingsContribution {
   memo: string;
 }
 export interface RecurringExpense {
+  sourceAccountId?: ID;
   id: ID;
   name: string;
   amount: number;
@@ -136,6 +166,8 @@ export interface DailyCheckIn {
   confirmedAt: string;
 }
 export interface Favorite {
+  sourceAccountId?: ID;
+  paymentChannel?: PaymentChannel;
   id: ID;
   name: string;
   amount: number;
@@ -151,6 +183,10 @@ export interface SalarySchedule {
   variableIncome: boolean;
 }
 export interface AppSettings {
+  budgetCycle?: BudgetCycleConfig;
+  financialAutomationEnabled?: boolean;
+  reminder?: ReminderSettings;
+  saveReceiptImages?: boolean;
   id: "main";
   openingLiquidBalance: number | null;
   salarySchedule: SalarySchedule | null;
@@ -164,6 +200,15 @@ export interface AppSettings {
   lockAfterSeconds: 0 | 60 | 300 | 900;
 }
 export interface AppData {
+  accounts?: Account[];
+  transfers?: Transfer[];
+  financialConnections?: FinancialConnection[];
+  externalTransactions?: ExternalTransaction[];
+  syncStates?: SyncState[];
+  receipts?: Receipt[];
+  salaryRules?: SalaryRule[];
+  financialAudits?: FinancialAudit[];
+  accountAdjustments?: AccountAdjustment[];
   expenses: Expense[];
   incomes: Income[];
   cards: CreditCard[];
@@ -183,8 +228,8 @@ export interface AppData {
   favorites: Favorite[];
 }
 export const APP_NAME = "Pace";
-export const APP_VERSION = "1.3.0";
-export const SCHEMA_VERSION = 1;
+export const APP_VERSION = "2.0.0";
+export const SCHEMA_VERSION = 2;
 export const paymentLabels: Record<PaymentMethod, string> = {
   cash: "現金",
   debit: "デビット",

@@ -1,3 +1,5 @@
+> この文書は1.x時点の記録です。2.0の仕様・検証結果は[金融管理の完成報告](FINANCIAL-AUTOMATION.md)と[暗号化の構成](PRIVACY-AND-ENCRYPTION.md)を参照してください。
+
 # 公開済みPaceの更新
 
 ## 利用する人の操作

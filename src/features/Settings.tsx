@@ -103,12 +103,18 @@ export function Settings() {
       <div className="privacy-card">
         <ShieldCheck size={24} />
         <div>
-          <b>お金の情報は、この端末だけに。</b>
-          <p>アカウント不要。広告も、自動同期もありません。</p>
+          <b>お金の情報は、暗号化した保管庫に。</b>
+          <p>
+            {data.financialConnections?.some((c) => c.status === "connected")
+              ? "許可した金融連携だけを使用します。"
+              : "金融連携は任意。広告・解析はありません。"}
+          </p>
         </div>
       </div>
       <h2 className="settings-label">お金の設定</h2>
       <div className="surface settings-group">
+        {link(<Wallet />, "銀行・現金・電子マネー", "/money")}
+        {link(<ShieldCheck />, "金融連携・通知・プライバシー", "/financial")}
         {row(<Wallet />, "残高を合わせる", () =>
           setEditor({ mode: "balance" }),
         )}
@@ -462,7 +468,7 @@ export function Settings() {
           {panel === "delete" && (
             <>
               <p className="notice">
-                支出・収入・予定・設定など、この端末の全データを削除します。削除後は元に戻せません。
+                支出・収入・予定・家計設定など、この端末のデータを削除します。削除後は元に戻せません。暗号化保管庫とパスフレーズは維持します。金融サービス側の認可も取り消す場合は、先に「連携とプライバシー」で解除してください。
               </p>
               <button
                 className="button button-secondary full"
@@ -505,9 +511,9 @@ export function Settings() {
               <p>
                 カードの未払い、固定費、返済、貯金の予定を見えるようにして、自分のお金のペースを確かめるアプリです。
               </p>
-              <h3>家計データは端末内のみ</h3>
+              <h3>端末内で暗号化して保存</h3>
               <p>
-                IndexedDBに保存します。家計データを外部へ送信する処理、広告、アクセス解析、自動同期はありません。
+                家計記録・レシート・連携の認証情報は暗号化したIndexedDBに保存します。本人が金融連携を許可した場合だけ、Moneytreeの公式APIで口座・残高・明細を取得します。レシートの外部送信、広告、アクセス解析、家計データの端末間自動同期はありません。
               </p>
               <h3>バックアップについて</h3>
               <p>

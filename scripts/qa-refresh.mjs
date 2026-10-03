@@ -1,3 +1,4 @@
+import { installVaultSupport } from './qa-vault-support.mjs';
 import { chromium, expect } from "@playwright/test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -25,6 +26,7 @@ try {
     reducedMotion: "reduce",
   });
   const page = await context.newPage();
+installVaultSupport(page);
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(base);
   await page.locator(".pace-journey").waitFor();

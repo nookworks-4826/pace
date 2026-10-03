@@ -13,11 +13,16 @@ export function previewPurchase(
   dateKey(today);
   if (finance.safeToSpend === null) return null;
   const safeAfter = finance.safeToSpend - amount;
+  const budgetRemaining =
+    finance.cycle.mode === "salary"
+      ? finance.periodBudgetRemaining
+      : finance.monthlyBudgetRemaining;
   const budgetAfter =
-    finance.monthlyBudgetRemaining === null
-      ? null
-      : finance.monthlyBudgetRemaining - amount;
-  const daysAfterToday = remainingDaysIncludingToday(today) - 1;
+    budgetRemaining === null ? null : budgetRemaining - amount;
+  const daysAfterToday =
+    (finance.cycle.mode === "salary"
+      ? finance.cycle.remainingDaysIncludingToday
+      : remainingDaysIncludingToday(today)) - 1;
   const available = Math.max(0, Math.min(safeAfter, budgetAfter ?? Infinity));
   return {
     safeAfter,

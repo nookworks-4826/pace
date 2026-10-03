@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
   CreditCard as CardIcon,
@@ -79,6 +79,65 @@ export function FinanceEditor({
   const [cashReceived, setCashReceived] = useState(
     (entity as Debt)?.cashReceived ?? false,
   );
+  const accountMode = data.settings.financialAutomationEnabled === true;
+  const salaryCycle = finance.cycle.mode === "salary";
+  const [repaymentActive, setRepaymentActive] = useState(
+    entity ? (entity as Debt).reserveForCurrentBudget !== false : false,
+  );
+  const accountSelectionModes = [
+    "income",
+    "cardPayment",
+    "repayment",
+    "contribution",
+    "recurring",
+    "confirmRecurring",
+  ];
+  const needsAccount = accountMode && accountSelectionModes.includes(mode);
+  const effectiveMethod =
+    mode === "confirmRecurring"
+      ? (entity as RecurringExpense).paymentMethod
+      : method;
+  const eligibleAccounts = (data.accounts ?? []).filter((account) => {
+    if (!account.isActive) return false;
+    if (mode === "cardPayment") return account.kind === "BANK";
+    if (mode === "income" || mode === "repayment" || mode === "contribution")
+      return account.kind !== "CREDIT_CARD" && account.isSpendable;
+    return effectiveMethod === "creditCard"
+      ? account.kind === "CREDIT_CARD" &&
+          !!account.creditCardId &&
+          (mode !== "confirmRecurring" ||
+            account.creditCardId === (entity as RecurringExpense).creditCardId)
+      : effectiveMethod === "cash"
+        ? account.kind === "CASH"
+        : effectiveMethod === "bank" || effectiveMethod === "debit"
+          ? account.kind === "BANK"
+          : account.kind === "EWALLET" || account.kind === "OTHER";
+  });
+  const accountField = needsAccount ? (
+    <Field label={mode === "income" ? "入金先" : "支払元"}>
+      <select
+        key={`${mode}-${effectiveMethod}`}
+        name="sourceAccountId"
+        required
+        defaultValue={
+          (entity as Income | RecurringExpense)?.sourceAccountId ??
+          (eligibleAccounts.length === 1 ? eligibleAccounts[0].id : "")
+        }
+      >
+        <option value="">選択してください</option>
+        {eligibleAccounts.map((account) => (
+          <option key={account.id} value={account.id}>
+            {account.name}
+          </option>
+        ))}
+      </select>
+      {eligibleAccounts.length === 0 && (
+        <Link className="text-button" to="/money" onClick={onClose}>
+          口座を追加する
+        </Link>
+      )}
+    </Field>
+  ) : null;
   const titles: Record<Mode, string> = {
     card: "カードを設定",
     cardPayment: "カード引落を記録",
@@ -89,7 +148,7 @@ export function FinanceEditor({
     recurring: "固定費を設定",
     confirmRecurring: "固定費の支払いを確認",
     income: "収入を記録",
-    budget: "今月の予算",
+    budget: salaryCycle ? "今期の予算" : "今月の予算",
     balance: "残高を合わせる",
     salary: "給料日の予定",
   };
@@ -141,12 +200,22 @@ export function FinanceEditor({
   );
   const selectedBudget = data.budgets.find(
     (b) =>
-      b.year === Number(today.slice(0, 4)) &&
-      b.month === Number(today.slice(5, 7)),
+      b.year === Number(finance.cycle.start.slice(0, 4)) &&
+      b.month === Number(finance.cycle.start.slice(5, 7)),
   );
   async function submit(f: FormData) {
     const date = textValue(f, "date") || today;
     const now = new Date().toISOString();
+    const sourceAccountId = textValue(f, "sourceAccountId") || undefined;
+    const sourceAccount = eligibleAccounts.find(
+      (account) => account.id === sourceAccountId,
+    );
+    if (needsAccount && !sourceAccount)
+      throw new Error(
+        mode === "income"
+          ? "入金先の口座を選んでください。"
+          : "支払元の口座を選んでください。",
+      );
     if (
       [
         "income",
@@ -204,6 +273,7 @@ export function FinanceEditor({
           throw new Error("現在の未払い額を超える引落は登録できません。");
         await db.cardPayments.add({
           ...stamp(),
+          sourceAccountId,
           creditCardId: card.id,
           amount: a,
           date,
@@ -235,6 +305,7 @@ export function FinanceEditor({
           note: textValue(f, "memo"),
           isEstimated: f.get("estimated") === "on",
           cashReceived,
+          reserveForCurrentBudget: repaymentActive,
           status: opening - repaid > 0 ? "active" : "paid",
           updatedAt: now,
         });
@@ -253,6 +324,9 @@ export function FinanceEditor({
         await db.transaction("rw", db.debts, db.repayments, async () => {
           await db.repayments.add({
             id: crypto.randomUUID(),
+            createdAt: now,
+            updatedAt: now,
+            sourceAccountId,
             debtId: debt.id,
             amount: a,
             date,
@@ -293,6 +367,9 @@ export function FinanceEditor({
           async () => {
             await db.savingsContributions.add({
               id: crypto.randomUUID(),
+              createdAt: now,
+              updatedAt: now,
+              sourceAccountId,
               savingsGoalId: goal.id,
               amount: a,
               date,
@@ -314,6 +391,11 @@ export function FinanceEditor({
         const cardId = textValue(f, "card");
         if (method === "creditCard" && !cardId)
           throw new Error("利用カードを選んでください。");
+        if (
+          sourceAccount?.kind === "CREDIT_CARD" &&
+          sourceAccount.creditCardId !== cardId
+        )
+          throw new Error("支払元と利用カードをそろえてください。");
         const start = textValue(f, "startDate"),
           end = textValue(f, "endDate");
         if (end && end < start)
@@ -326,6 +408,7 @@ export function FinanceEditor({
           subcategoryId: textValue(f, "subcategory"),
           paymentMethod: method,
           creditCardId: method === "creditCard" ? cardId : undefined,
+          sourceAccountId,
           frequency: textValue(f, "frequency") as "monthly" | "yearly",
           dueDay: Number(f.get("dueDay")),
           startDate: start,
@@ -355,6 +438,10 @@ export function FinanceEditor({
           subcategoryId: recurring.subcategoryId,
           paymentMethod: recurring.paymentMethod,
           creditCardId: recurring.creditCardId,
+          sourceAccountId,
+          balanceEffect: accountMode ? "ledger" : undefined,
+          pendingStatus:
+            recurring.paymentMethod === "creditCard" ? "pending" : undefined,
           memo: textValue(f, "memo"),
           isFixedCost: true,
           recurringOccurrenceId: occurrenceId,
@@ -371,6 +458,12 @@ export function FinanceEditor({
           source: textValue(f, "source"),
           memo: textValue(f, "memo"),
           type: textValue(f, "type") as Income["type"],
+          sourceAccountId,
+          balanceEffect: old?.externalTransactionId
+            ? (old.balanceEffect ?? "snapshot")
+            : accountMode
+              ? "ledger"
+              : undefined,
           updatedAt: now,
         });
         break;
@@ -382,11 +475,11 @@ export function FinanceEditor({
           if (v > 0) categoryBudgets[c.id] = money(f.get(`cat-${c.id}`));
         }
         if (Object.values(categoryBudgets).reduce((s, v) => s + v, 0) > a)
-          throw new Error("カテゴリー予算の合計が月予算を超えています。");
+          throw new Error("カテゴリー予算の合計が期間の予算を超えています。");
         await db.budgets.put({
           ...(selectedBudget ?? stamp()),
-          year: Number(today.slice(0, 4)),
-          month: Number(today.slice(5, 7)),
+          year: Number(finance.cycle.start.slice(0, 4)),
+          month: Number(finance.cycle.start.slice(5, 7)),
           totalBudget: a,
           categoryBudgets,
           updatedAt: now,
@@ -394,6 +487,8 @@ export function FinanceEditor({
         break;
       }
       case "balance": {
+        if (accountMode)
+          throw new Error("「お金」画面で口座ごとに残高を合わせてください。");
         await reconcileLiquidBalance(a, today, textValue(f, "memo"));
         await updateSettings({
           setupReviewed: [
@@ -452,7 +547,8 @@ export function FinanceEditor({
                   min="1"
                   max="31"
                   required
-                  defaultValue={(entity as CreditCard)?.closingDay ?? 31}
+                  defaultValue={(entity as CreditCard)?.closingDay}
+                  placeholder="明細で確認して入力"
                 />
               </Field>
               <Field label="支払日">
@@ -462,7 +558,7 @@ export function FinanceEditor({
                   min="1"
                   max="31"
                   required
-                  defaultValue={(entity as CreditCard)?.paymentDay ?? 27}
+                  defaultValue={(entity as CreditCard)?.paymentDay ?? 10}
                 />
               </Field>
             </div>
@@ -533,6 +629,20 @@ export function FinanceEditor({
               "借入日",
               "startedAt",
             )}
+            <label className="check-field">
+              <input
+                name="repaymentActive"
+                type="checkbox"
+                checked={repaymentActive}
+                onChange={(event) => setRepaymentActive(event.target.checked)}
+              />
+              返済開始・今期のお金を確保する
+            </label>
+            {!repaymentActive && (
+              <p className="hint">
+                残高は表示します。返済開始までは使っていい金額から差し引きません。
+              </p>
+            )}
             {amountField(
               "毎月の返済予定",
               (entity as Debt)?.plannedMonthlyPayment ?? 0,
@@ -557,13 +667,15 @@ export function FinanceEditor({
               <input
                 type="checkbox"
                 checked={cashReceived}
-                disabled={!!entity}
+                disabled={!!entity || accountMode}
                 onChange={(e) => setCashReceived(e.target.checked)}
               />
               今回、現金を受け取る借入
             </label>
             <p className="hint">
-              既存の借金や、現在残高に含めた借入はオフにします。オンの場合は開始時残高を「持っているお金」に加えます。
+              {accountMode
+                ? "受け取った借入は「お金」画面で実際の口座残高を合わせてください。"
+                : "既存の借金や、現在残高に含めた借入はオフにします。オンの場合は開始時残高を持っているお金に加えます。"}
             </p>
             {memoField((entity as Debt)?.note)}
           </>
@@ -712,6 +824,7 @@ export function FinanceEditor({
                 </select>
               </Field>
             )}
+            {accountField}
             <label className="check-field">
               <input
                 name="active"
@@ -757,6 +870,7 @@ export function FinanceEditor({
                     : (entity as SavingsGoal).monthlyTarget,
             )}
             {dateField()}
+            {accountField}
             {memoField()}
           </>
         )}
@@ -783,6 +897,7 @@ export function FinanceEditor({
               </select>
             </Field>
             {dateField((entity as Income)?.date)}
+            {accountField}
             {memoField((entity as Income)?.memo)}
             <p className="hint">
               入金済みの金額だけを記録します。給与の予想額は給料日の設定へ。
@@ -792,9 +907,16 @@ export function FinanceEditor({
         {mode === "budget" && (
           <>
             {amountField(
-              `${Number(today.slice(5, 7))}月の生活支出予算`,
+              salaryCycle
+                ? "今期の生活支出予算"
+                : `${Number(today.slice(5, 7))}月の生活支出予算`,
               selectedBudget?.totalBudget,
               true,
+            )}
+            {salaryCycle && (
+              <p className="hint">
+                {finance.cycle.start}〜{finance.cycle.end}
+              </p>
             )}
             <p className="hint">
               カード購入も含みます。返済・貯金・カード引落は含みません。0円の予算も設定できます。
@@ -841,7 +963,7 @@ export function FinanceEditor({
                 type="number"
                 min="1"
                 max="31"
-                defaultValue={data.settings.salarySchedule?.payday ?? 25}
+                defaultValue={data.settings.salarySchedule?.payday ?? 10}
               />
             </Field>
             <Field label="予想額（不明なら空欄）">
@@ -917,6 +1039,12 @@ export function Management() {
     await run(async () => {
       if (type === "card") {
         if (
+          (data.accounts ?? []).some((account) => account.creditCardId === id)
+        )
+          throw new Error(
+            "お金の置き場所と関連付けたカードは削除できません。編集で「利用中」をオフにしてください。",
+          );
+        if (
           data.expenses.some((e) => e.creditCardId === id) ||
           data.cardPayments.some((e) => e.creditCardId === id) ||
           data.recurringExpenses.some((e) => e.creditCardId === id) ||
@@ -966,10 +1094,34 @@ export function Management() {
       }
       if (type === "income") {
         const item = await db.incomes.get(id);
-        await db.incomes.delete(id);
+        const externalRows = (data.externalTransactions ?? []).filter(
+          (row) => row.linkedRecordId === id,
+        );
+        await db.transaction(
+          "rw",
+          db.incomes,
+          db.externalTransactions,
+          async () => {
+            await db.incomes.delete(id);
+            for (const row of externalRows)
+              await db.externalTransactions.put({
+                ...row,
+                kind: "ignored",
+                linkedRecordId: undefined,
+              });
+          },
+        );
         if (item)
           toast("削除しました", async () => {
-            await db.incomes.put(item);
+            await db.transaction(
+              "rw",
+              db.incomes,
+              db.externalTransactions,
+              async () => {
+                await db.incomes.put(item);
+                await db.externalTransactions.bulkPut(externalRows);
+              },
+            );
           });
       }
     });
@@ -1143,9 +1295,37 @@ export function Management() {
                                 )
                               )
                                 void run(async () => {
-                                  await db.cardPayments.delete(p.id);
+                                  const externalRows = (
+                                    data.externalTransactions ?? []
+                                  ).filter(
+                                    (row) => row.linkedRecordId === p.id,
+                                  );
+                                  await db.transaction(
+                                    "rw",
+                                    db.cardPayments,
+                                    db.externalTransactions,
+                                    async () => {
+                                      await db.cardPayments.delete(p.id);
+                                      for (const row of externalRows)
+                                        await db.externalTransactions.put({
+                                          ...row,
+                                          kind: "ignored",
+                                          linkedRecordId: undefined,
+                                        });
+                                    },
+                                  );
                                   toast("引落を削除しました", async () => {
-                                    await db.cardPayments.put(p);
+                                    await db.transaction(
+                                      "rw",
+                                      db.cardPayments,
+                                      db.externalTransactions,
+                                      async () => {
+                                        await db.cardPayments.put(p);
+                                        await db.externalTransactions.bulkPut(
+                                          externalRows,
+                                        );
+                                      },
+                                    );
                                   });
                                 });
                             }}
@@ -1226,8 +1406,16 @@ export function Management() {
                   <b>{Math.round((paid / debt.originalAmount) * 100)}%</b>
                 </div>
                 <div className="info-pair">
-                  <span>毎月の予定 · {debt.nextPaymentDate}</span>
-                  <b>{yen(debt.plannedMonthlyPayment)}</b>
+                  <span>
+                    {debt.reserveForCurrentBudget === false
+                      ? "返済開始前"
+                      : `毎月の予定 · ${debt.nextPaymentDate}`}
+                  </span>
+                  <b>
+                    {debt.reserveForCurrentBudget === false
+                      ? "今期の確保なし"
+                      : yen(debt.plannedMonthlyPayment)}
+                  </b>
                 </div>
                 <button
                   className="button button-secondary full"
@@ -1433,7 +1621,8 @@ export function Management() {
           <div className="note-panel">
             <CalendarClock size={20} />
             <span>
-              今月までの未確認分 {yen(finance.upcomingFixedCosts)}{" "}
+              {finance.cycle.mode === "salary" ? "今期" : "今月"}までの未確認分{" "}
+              {yen(finance.upcomingFixedCosts)}{" "}
               を確保しています。支払日は自動確定しません。
             </span>
           </div>

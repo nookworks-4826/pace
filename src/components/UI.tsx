@@ -113,18 +113,20 @@ export function AsyncForm({
   children,
   label = "保存する",
   className = "",
+  disabled = false,
 }: {
   onSubmit: (form: FormData) => Promise<void>;
   children: ReactNode;
   label?: string;
   className?: string;
+  disabled?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const guard = useRef(false);
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (guard.current) return;
+    if (guard.current || disabled) return;
     const form = new FormData(e.currentTarget);
     guard.current = true;
     setBusy(true);
@@ -153,7 +155,7 @@ export function AsyncForm({
       <div className="form-footer">
         <button
           type="submit"
-          disabled={busy}
+          disabled={busy || disabled}
           className="button button-primary full"
         >
           {busy ? (

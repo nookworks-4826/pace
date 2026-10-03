@@ -24,8 +24,15 @@ import {
   YAxis,
 } from "recharts";
 import type { AppData, Expense } from "../types";
-import { APP_NAME } from "../types";
-import { dateKey, todayJST } from "../domain/dates";
+import { APP_NAME, paymentLabels } from "../types";
+import {
+  addDaysDate,
+  dateKey,
+  dateOnDay,
+  daysBetween,
+  todayJST,
+} from "../domain/dates";
+import { getBudgetCycle } from "../domain/budgetCycle";
 import "./analytics.css";
 
 interface AnalyticsProps {
@@ -45,12 +52,6 @@ const yen = (amount: number) =>
   }).format(amount);
 const sum = (items: { amount: number }[]) =>
   items.reduce((total, item) => total + item.amount, 0);
-const daysInMonth = (month: string) =>
-  new Date(
-    Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0),
-  ).getUTCDate();
-const dayOf = (month: string, day: number) =>
-  `${month}-${String(day).padStart(2, "0")}`;
 const shiftMonth = (month: string, delta: number) =>
   new Date(
     Date.UTC(
@@ -75,8 +76,20 @@ const chartMoney = (amount: number) =>
 
 export function Analytics({ data, onViewHistory }: AnalyticsProps) {
   const today = todayJST();
-  const currentMonth = today.slice(0, 7);
   const [params] = useSearchParams();
+  const [periodMode, setPeriodMode] = useState<"calendar" | "salary">(
+    params.get("month")
+      ? "calendar"
+      : (data.settings.budgetCycle?.mode ?? "calendar"),
+  );
+  const startDay =
+    periodMode === "salary"
+      ? (data.settings.budgetCycle?.startDay ??
+        data.settings.salarySchedule?.payday ??
+        10)
+      : 1;
+  const cycleConfig = { mode: periodMode, startDay };
+  const currentMonth = getBudgetCycle(today, cycleConfig).start.slice(0, 7);
   const queryMonth = params.get("month");
   const initialMonth =
     queryMonth &&
@@ -91,28 +104,74 @@ export function Analytics({ data, onViewHistory }: AnalyticsProps) {
     params.get("report") === "1" || initialMonth !== currentMonth,
   );
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const rangeStart = dayOf(shiftMonth(month, -(range - 1)), 1);
-  const rangeEnd =
-    month === currentMonth ? today : dayOf(month, daysInMonth(month));
+  const selectedCycle = getBudgetCycle(dateOnDay(month, startDay), cycleConfig);
+  const firstCycle = getBudgetCycle(
+    dateOnDay(shiftMonth(month, -(range - 1)), startDay),
+    cycleConfig,
+  );
+  const rangeStart = firstCycle.start;
+  const rangeEnd = selectedCycle.end < today ? selectedCycle.end : today;
+  // Refunds are dated adjustments to spending, never fabricated income or mutated purchases.
+  const expenseRows = useMemo(
+    () => [
+      ...data.expenses,
+      ...(data.externalTransactions ?? [])
+        .filter(
+          (row) => row.kind === "refund" && row.pendingStatus !== "pending",
+        )
+        .map((row): Expense => {
+          const original = data.expenses.find(
+            (expense) => expense.id === row.relatedExpenseId,
+          );
+          const account = data.accounts?.find(
+            (item) => item.id === row.accountId,
+          );
+          return {
+            id: `refund:${row.id}`,
+            createdAt: row.createdAt,
+            updatedAt: row.updatedAt,
+            amount: -Math.abs(row.amount),
+            date: row.date,
+            merchant: original?.merchant ?? row.description,
+            description: "返金",
+            memo: "",
+            categoryId: original?.categoryId ?? "uncategorized",
+            subcategoryId: original?.subcategoryId ?? "",
+            paymentMethod:
+              original?.paymentMethod ??
+              (account?.kind === "CREDIT_CARD"
+                ? "creditCard"
+                : account?.kind === "CASH"
+                  ? "cash"
+                  : "other"),
+            creditCardId: original?.creditCardId ?? account?.creditCardId,
+            sourceAccountId: row.accountId,
+            isFixedCost: original?.isFixedCost ?? false,
+          };
+        }),
+    ],
+    [data.expenses, data.externalTransactions, data.accounts],
+  );
   const inRange = (date: string) =>
     dateKey(date) >= rangeStart && dateKey(date) <= rangeEnd;
   const periodExpenses = useMemo(
     () =>
-      data.expenses.filter(
+      expenseRows.filter(
         (expense) =>
           dateKey(expense.date) >= rangeStart &&
           dateKey(expense.date) <= rangeEnd,
       ),
-    [data.expenses, rangeStart, rangeEnd],
+    [expenseRows, rangeStart, rangeEnd],
   );
   const monthExpenses = useMemo(
     () =>
-      data.expenses.filter(
+      expenseRows.filter(
         (expense) =>
-          dateKey(expense.date).slice(0, 7) === month &&
+          dateKey(expense.date) >= selectedCycle.start &&
+          dateKey(expense.date) <= selectedCycle.end &&
           dateKey(expense.date) <= today,
       ),
-    [data.expenses, month, today],
+    [expenseRows, selectedCycle.start, selectedCycle.end, today],
   );
   const expenseTotal = sum(periodExpenses);
   const incomeTotal = sum(
@@ -145,11 +204,16 @@ export function Analytics({ data, onViewHistory }: AnalyticsProps) {
           data.categories.find((category) => category.id === id)?.color ??
           "#8494a4",
       }))
+      .filter((item) => item.value > 0)
       .sort((a, b) => b.value - a.value);
   }, [periodExpenses, data.categories]);
   const activeCategory =
     categoryData.find((category) => category.id === selectedCategory) ??
     categoryData[0];
+  const categoryPositiveTotal = categoryData.reduce(
+    (total, item) => total + item.value,
+    0,
+  );
   const merchantData = useMemo(() => {
     const amounts = new Map<string, { amount: number; count: number }>();
     for (const expense of periodExpenses) {
@@ -158,11 +222,12 @@ export function Analytics({ data, onViewHistory }: AnalyticsProps) {
       const previous = amounts.get(name) ?? { amount: 0, count: 0 };
       amounts.set(name, {
         amount: previous.amount + expense.amount,
-        count: previous.count + 1,
+        count: previous.count + (expense.id.startsWith("refund:") ? 0 : 1),
       });
     }
     return [...amounts]
       .map(([name, item]) => ({ name, ...item }))
+      .filter((item) => item.amount > 0)
       .sort((a, b) => b.amount - a.amount)
       .slice(0, 5);
   }, [periodExpenses]);
@@ -170,34 +235,37 @@ export function Analytics({ data, onViewHistory }: AnalyticsProps) {
     () =>
       Array.from({ length: 12 }, (_, index) => {
         const key = shiftMonth(month, index - 11);
+        const cycle = getBudgetCycle(dateOnDay(key, startDay), cycleConfig);
         return {
           key,
-          name: `${Number(key.slice(5))}月`,
+          name: `${Number(key.slice(5))}${periodMode === "salary" ? "期" : "月"}`,
           収入: sum(
             data.incomes.filter(
               (item) =>
-                dateKey(item.date).slice(0, 7) === key &&
+                dateKey(item.date) >= cycle.start &&
+                dateKey(item.date) <= cycle.end &&
                 dateKey(item.date) <= today,
             ),
           ),
           支出: sum(
-            data.expenses.filter(
+            expenseRows.filter(
               (item) =>
-                dateKey(item.date).slice(0, 7) === key &&
+                dateKey(item.date) >= cycle.start &&
+                dateKey(item.date) <= cycle.end &&
                 dateKey(item.date) <= today,
             ),
           ),
         };
       }),
-    [data.incomes, data.expenses, month, today],
+    [data.incomes, expenseRows, month, today, startDay, periodMode],
   );
   const dailySeries = useMemo(
     () =>
-      Array.from({ length: daysInMonth(month) }, (_, index) => {
-        const key = dayOf(month, index + 1);
+      Array.from({ length: selectedCycle.totalDays }, (_, index) => {
+        const key = addDaysDate(selectedCycle.start, index);
         return {
           date: key,
-          name: `${index + 1}`,
+          name: `${Number(key.slice(8))}`,
           支出:
             key > today
               ? null
@@ -208,16 +276,23 @@ export function Analytics({ data, onViewHistory }: AnalyticsProps) {
                 ),
         };
       }),
-    [monthExpenses, month, today],
+    [monthExpenses, selectedCycle.start, selectedCycle.totalDays, today],
   );
   const previousMonth = shiftMonth(month, -1);
+  const previousCycle = getBudgetCycle(
+    dateOnDay(previousMonth, startDay),
+    cycleConfig,
+  );
   const comparisonDay =
     month === currentMonth
-      ? Math.min(Number(today.slice(8)), daysInMonth(previousMonth))
-      : daysInMonth(previousMonth);
-  const previousStart = dayOf(previousMonth, 1),
-    previousEnd = dayOf(previousMonth, comparisonDay);
-  const previousExpenses = data.expenses.filter(
+      ? Math.min(
+          daysBetween(selectedCycle.start, rangeEnd) + 1,
+          previousCycle.totalDays,
+        )
+      : previousCycle.totalDays;
+  const previousStart = previousCycle.start,
+    previousEnd = addDaysDate(previousStart, comparisonDay - 1);
+  const previousExpenses = expenseRows.filter(
     (expense) =>
       dateKey(expense.date) >= previousStart &&
       dateKey(expense.date) <= previousEnd,
@@ -247,7 +322,7 @@ export function Analytics({ data, onViewHistory }: AnalyticsProps) {
       const days = tracked.filter(
         (day) => new Date(`${day}T00:00:00Z`).getUTCDay() === weekday,
       );
-      const amounts = data.expenses.filter((item) =>
+      const amounts = expenseRows.filter((item) =>
         days.includes(dateKey(item.date)),
       );
       return {
@@ -256,16 +331,16 @@ export function Analytics({ data, onViewHistory }: AnalyticsProps) {
         count: days.length,
       };
     });
-  }, [trackedDays, data.expenses, today]);
+  }, [trackedDays, expenseRows, today]);
   const weekOffset = (new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7;
   const weekStart = shiftDay(today, -weekOffset),
     lastWeekStart = shiftDay(weekStart, -7),
     lastWeekEnd = shiftDay(today, -7);
-  const weeklyExpenses = data.expenses.filter(
+  const weeklyExpenses = expenseRows.filter(
     (expense) =>
       dateKey(expense.date) >= weekStart && dateKey(expense.date) <= today,
   );
-  const lastWeekExpenses = data.expenses.filter(
+  const lastWeekExpenses = expenseRows.filter(
     (expense) =>
       dateKey(expense.date) >= lastWeekStart &&
       dateKey(expense.date) <= lastWeekEnd,
@@ -302,8 +377,27 @@ export function Analytics({ data, onViewHistory }: AnalyticsProps) {
     setSelectedCategory(null);
   };
   const biggest = [...periodExpenses]
+    .filter((row) => row.amount > 0)
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 5);
+  const sourceData = useMemo(() => {
+    const amounts = new Map<string, { name: string; amount: number }>();
+    for (const expense of periodExpenses) {
+      const account = data.accounts?.find(
+        (row) => row.id === expense.sourceAccountId,
+      );
+      const id = account?.id ?? `method:${expense.paymentMethod}`;
+      const entry = amounts.get(id) ?? {
+        name: account?.name ?? paymentLabels[expense.paymentMethod],
+        amount: 0,
+      };
+      amounts.set(id, { ...entry, amount: entry.amount + expense.amount });
+    }
+    return [...amounts]
+      .map(([id, row]) => ({ id, ...row }))
+      .filter((row) => row.amount !== 0)
+      .sort((a, b) => b.amount - a.amount);
+  }, [periodExpenses, data.accounts]);
 
   return (
     <div className="page analytics-page">
@@ -311,7 +405,11 @@ export function Analytics({ data, onViewHistory }: AnalyticsProps) {
         <div>
           <p className="eyebrow">YOUR MONEY, IN PERSPECTIVE</p>
           <h1 className="page-title">
-            {report ? "月のレポート" : "お金の流れ"}
+            {report
+              ? periodMode === "salary"
+                ? "期のレポート"
+                : "月のレポート"
+              : "お金の流れ"}
           </h1>
           <p className="muted">使い方が見えると、次の一日が決めやすい。</p>
         </div>
@@ -327,6 +425,31 @@ export function Analytics({ data, onViewHistory }: AnalyticsProps) {
           <FileText size={21} />
         </button>
       </header>
+      <div className="segmented analytics-ranges" aria-label="期間の種類">
+        {(["calendar", "salary"] as const).map((mode) => (
+          <button
+            key={mode}
+            className={periodMode === mode ? "active" : ""}
+            aria-pressed={periodMode === mode}
+            onClick={() => {
+              setPeriodMode(mode);
+              const maximum = getBudgetCycle(today, {
+                mode,
+                startDay:
+                  mode === "salary"
+                    ? (data.settings.budgetCycle?.startDay ??
+                      data.settings.salarySchedule?.payday ??
+                      10)
+                    : 1,
+              }).start.slice(0, 7);
+              if (month === currentMonth || month > maximum) setMonth(maximum);
+              setSelectedCategory(null);
+            }}
+          >
+            {mode === "calendar" ? "カレンダー月" : "給与サイクル"}
+          </button>
+        ))}
+      </div>
       <div className="analytics-period surface">
         <button
           className="icon-button"
@@ -363,6 +486,11 @@ export function Analytics({ data, onViewHistory }: AnalyticsProps) {
           <ChevronRight size={20} />
         </button>
       </div>
+      {periodMode === "salary" && (
+        <p className="muted analytics-range-label">
+          {rangeStart.replaceAll("-", "/")}〜{rangeEnd.replaceAll("-", "/")}
+        </p>
+      )}
       {!report && (
         <div className="segmented analytics-ranges" aria-label="集計期間">
           {[1, 3, 6, 12].map((value) => (
@@ -375,12 +503,18 @@ export function Analytics({ data, onViewHistory }: AnalyticsProps) {
                 setSelectedCategory(null);
               }}
             >
-              {value === 1 ? "月" : value === 12 ? "1年" : `${value}か月`}
+              {value === 1
+                ? periodMode === "salary"
+                  ? "今期"
+                  : "月"
+                : value === 12
+                  ? "1年"
+                  : `${value}${periodMode === "salary" ? "期" : "か月"}`}
             </button>
           ))}
         </div>
       )}
-      {range > 1 && (
+      {range > 1 && periodMode === "calendar" && (
         <p className="muted analytics-range-label">
           {monthLabel(rangeStart.slice(0, 7))}〜{monthLabel(month)}の実績
         </p>
@@ -389,7 +523,10 @@ export function Analytics({ data, onViewHistory }: AnalyticsProps) {
         <div className="analytics-report-heading">
           <p className="eyebrow">MONTHLY REFLECTION</p>
           <h2>
-            {Number(month.slice(5))}月の{APP_NAME}
+            {periodMode === "salary"
+              ? `${selectedCycle.start.slice(5).replace("-", "/")}〜${selectedCycle.end.slice(5).replace("-", "/")}`
+              : `${Number(month.slice(5))}月`}
+            の{APP_NAME}
           </h2>
           <p>
             {month === currentMonth
@@ -401,7 +538,11 @@ export function Analytics({ data, onViewHistory }: AnalyticsProps) {
       <section className="surface analytics-summary" aria-label="期間の概要">
         <div className="analytics-main-total">
           <span className="muted">
-            {range === 1 ? "この月の生活支出" : "期間の生活支出"}
+            {range === 1
+              ? periodMode === "salary"
+                ? "この期の生活支出"
+                : "この月の生活支出"
+              : "期間の生活支出"}
           </span>
           <strong>{yen(expenseTotal)}</strong>
           <span className="analytics-record-count">
@@ -433,12 +574,12 @@ export function Analytics({ data, onViewHistory }: AnalyticsProps) {
         {range === 1 && (
           <p className="analytics-comparison">
             {hasPreviousData
-              ? `${month === currentMonth ? "先月同日まで" : "先月"}の記録より ${yen(Math.abs(monthlyDifference))}${monthlyDifference > 0 ? "多い" : monthlyDifference < 0 ? "少ない" : "・同じ金額"}`
-              : "前月の記録が増えると、同じ期間で比較できます。"}
+              ? `${periodMode === "salary" ? (month === currentMonth ? "前期の同じ日数" : "前期") : month === currentMonth ? "先月同日まで" : "先月"}の記録より ${yen(Math.abs(monthlyDifference))}${monthlyDifference > 0 ? "多い" : monthlyDifference < 0 ? "少ない" : "・同じ金額"}`
+              : "前の期間の記録が増えると比較できます。"}
           </p>
         )}
         <p className="muted analytics-footnote">
-          購入日で集計。カード引落は二重計上せず、返済・貯金の移動は分けています。
+          購入日で集計し、返金は返金日に差し引きます。振替・チャージ・カード引落は生活支出に含みません。
         </p>
       </section>
 
@@ -485,9 +626,10 @@ export function Analytics({ data, onViewHistory }: AnalyticsProps) {
                 <span>{activeCategory?.name}</span>
                 <strong>{yen(activeCategory?.value ?? 0)}</strong>
                 <span>
-                  {expenseTotal
+                  {categoryPositiveTotal
                     ? Math.round(
-                        ((activeCategory?.value ?? 0) / expenseTotal) * 100,
+                        ((activeCategory?.value ?? 0) / categoryPositiveTotal) *
+                          100,
                       )
                     : 0}
                   %
@@ -506,17 +648,25 @@ export function Analytics({ data, onViewHistory }: AnalyticsProps) {
                   <span>{category.name}</span>
                   <strong>{yen(category.value)}</strong>
                   <small>
-                    {Math.round((category.value / expenseTotal) * 100)}%
+                    {Math.round((category.value / categoryPositiveTotal) * 100)}
+                    %
                   </small>
                 </button>
               ))}
             </div>
+            {(data.externalTransactions ?? []).some(
+              (row) => row.kind === "refund" && inRange(row.date),
+            ) && (
+              <p className="muted analytics-footnote">
+                返金を差し引いた、支出が残っている分類の割合です。
+              </p>
+            )}
             <button
               className="button button-secondary analytics-full-width"
               onClick={() =>
                 onViewHistory(
                   activeCategory?.id,
-                  range === 1 ? month : undefined,
+                  range === 1 && periodMode === "calendar" ? month : undefined,
                   rangeStart,
                   rangeEnd,
                 )
@@ -535,10 +685,35 @@ export function Analytics({ data, onViewHistory }: AnalyticsProps) {
         )}
       </section>
 
+      <section
+        className="surface analytics-section"
+        aria-label="支払元別の内訳"
+      >
+        <div className="section-heading">
+          <h2>何から支払った？</h2>
+          <span className="muted">口座・支払方法</span>
+        </div>
+        {sourceData.length ? (
+          <div className="analytics-category-list">
+            {sourceData.map((row) => (
+              <div key={row.id} className="info-pair">
+                <span>{row.name}</span>
+                <strong>{yen(row.amount)}</strong>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="muted">支出を登録すると内訳が表示されます。</p>
+        )}
+        <p className="muted analytics-footnote">
+          Apple Payは使用したカードにまとめます。振替は含みません。
+        </p>
+      </section>
+
       {report && (
         <section className="surface analytics-section">
           <div className="section-heading">
-            <h2>今月の内訳</h2>
+            <h2>{periodMode === "salary" ? "今期" : "今月"}の内訳</h2>
             <span className="muted">実績</span>
           </div>
           <dl className="analytics-report-lines">
@@ -571,8 +746,10 @@ export function Analytics({ data, onViewHistory }: AnalyticsProps) {
 
       <section className="surface analytics-section">
         <div className="section-heading">
-          <h2>月ごとの流れ</h2>
-          <span className="muted">過去12か月</span>
+          <h2>{periodMode === "salary" ? "期" : "月"}ごとの流れ</h2>
+          <span className="muted">
+            過去12{periodMode === "salary" ? "期" : "か月"}
+          </span>
         </div>
         <div className="analytics-chart-key">
           <span>
@@ -660,7 +837,11 @@ export function Analytics({ data, onViewHistory }: AnalyticsProps) {
       <section className="surface analytics-section">
         <div className="section-heading">
           <h2>毎日の記録</h2>
-          <span className="muted">{Number(month.slice(5))}月</span>
+          <span className="muted">
+            {periodMode === "salary"
+              ? `${selectedCycle.start.slice(5).replace("-", "/")}〜${selectedCycle.end.slice(5).replace("-", "/")}`
+              : `${Number(month.slice(5))}月`}
+          </span>
         </div>
         <div className="analytics-chart" aria-label="日別の生活支出グラフ">
           <ResponsiveContainer width="100%" height={154} minWidth={0}>
@@ -708,8 +889,8 @@ export function Analytics({ data, onViewHistory }: AnalyticsProps) {
               />
               <Tooltip
                 formatter={(value) => yen(Number(value))}
-                labelFormatter={(label) =>
-                  `${Number(month.slice(5))}月${label}日`
+                labelFormatter={(_, payload) =>
+                  String(payload[0]?.payload?.date ?? "").replaceAll("-", "/")
                 }
                 contentStyle={{
                   borderRadius: 14,
@@ -731,7 +912,7 @@ export function Analytics({ data, onViewHistory }: AnalyticsProps) {
         </div>
         <div
           className="analytics-calendar"
-          aria-label={`${monthLabel(month)}の支出カレンダー`}
+          aria-label={`${selectedCycle.start}〜${selectedCycle.end}の支出カレンダー`}
         >
           {weekNames.map((day) => (
             <span className="analytics-weekday" key={day}>
@@ -739,7 +920,9 @@ export function Analytics({ data, onViewHistory }: AnalyticsProps) {
             </span>
           ))}
           {Array.from(
-            { length: new Date(`${month}-01T00:00:00Z`).getUTCDay() },
+            {
+              length: new Date(`${selectedCycle.start}T00:00:00Z`).getUTCDay(),
+            },
             (_, index) => (
               <span key={`blank-${index}`} />
             ),
@@ -749,7 +932,10 @@ export function Analytics({ data, onViewHistory }: AnalyticsProps) {
               ...dailySeries.map((item) => item.支出 ?? 0),
               1,
             );
-            const alpha = day.支出 ? 0.08 + (day.支出 / max) * 0.2 : 0;
+            const alpha =
+              day.支出 !== null && day.支出 > 0
+                ? 0.08 + (day.支出 / max) * 0.2
+                : 0;
             return (
               <div
                 className={`analytics-calendar-day ${day.date === today ? "is-today" : ""} ${day.date > today ? "is-future" : ""}`}
@@ -759,9 +945,13 @@ export function Analytics({ data, onViewHistory }: AnalyticsProps) {
                     ? `rgba(40, 94, 112, ${alpha})`
                     : undefined,
                 }}
-                aria-label={`${day.name}日 ${day.支出 === null ? "未来" : `${yen(day.支出)}${day.支出 === 0 && !trackedDays.has(day.date) ? "、記録未確認" : ""}`}`}
+                aria-label={`${day.date} ${day.支出 === null ? "未来" : `${yen(day.支出)}${day.支出 === 0 && !trackedDays.has(day.date) ? "、記録未確認" : ""}`}`}
               >
-                <span>{day.name}</span>
+                <span>
+                  {periodMode === "salary" && day.name === "1"
+                    ? `${Number(day.date.slice(5, 7))}/1`
+                    : day.name}
+                </span>
                 <strong>
                   {day.支出 === null
                     ? "—"

@@ -42,6 +42,11 @@ import { ExpenseSheet } from "../features/ExpenseSheet";
 import { Onboarding } from "../features/Onboarding";
 import { LockScreen } from "../features/Security";
 import { Timeline } from "../features/Timeline";
+import { VaultGate } from '../features/VaultGate';
+import { Money } from '../features/Money';
+import { FinancialSettings } from '../features/FinancialSettings';
+import { useFinancialConnections } from '../hooks/useFinancialConnections';
+import { useFinancialReminder } from '../hooks/useFinancialReminder';
 import { APP_NAME } from "../types";
 import type { Expense } from "../types";
 const Analytics = lazy(() =>
@@ -99,6 +104,8 @@ function AnalyticsRoute() {
 }
 function Application() {
   const { data, error } = useAppData();
+  useFinancialConnections(data);
+  useFinancialReminder(data);
   const [today, setToday] = useState(todayJST());
   const [expense, setExpense] = useState<Expense | true | null>(null);
   const [notice, setNotice] = useState<{
@@ -305,6 +312,8 @@ function Application() {
               <Route path="/history" element={<History />} />
               <Route path="/analytics" element={<AnalyticsRoute />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/money" element={<Money />} />
+              <Route path="/financial" element={<FinancialSettings />} />
               <Route path="/manage/:section" element={<Management />} />
               <Route path="/timeline" element={<Timeline />} />
               <Route path="*" element={<Navigate to="/" replace />} />
@@ -378,7 +387,7 @@ export function App() {
   return (
     <ErrorBoundary>
       <HashRouter>
-        <Application />
+        <VaultGate><Application /></VaultGate>
       </HashRouter>
     </ErrorBoundary>
   );

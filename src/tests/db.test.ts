@@ -1,5 +1,5 @@
 import "fake-indexeddb/auto";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearAllData,
   db,
@@ -16,6 +16,12 @@ import {
 import type { Expense } from "../types";
 import { computeFinance } from "../domain/finance";
 import { validateData } from "../domain/backup/schema";
+import {
+  getVaultStatus,
+  initializeVault,
+  lockVault,
+  unlockVault,
+} from "../domain/vault";
 
 const stamped = {
   createdAt: "2026-09-24T12:00:00+09:00",
@@ -45,7 +51,10 @@ afterAll(() => db.close());
 
 describe("IndexedDB persistence and atomic mutation", () => {
   it("keeps unfinished financial drafts in IndexedDB and clears them on restore", async () => {
-    await db.drafts.put({ id: "expense", value: JSON.stringify({ amount: "680", merchant: "カフェ" }) });
+    await db.drafts.put({
+      id: "expense",
+      value: JSON.stringify({ amount: "680", merchant: "カフェ" }),
+    });
     expect((await db.drafts.get("expense"))?.value).toContain("680");
     const snapshot = await readAppData();
     expect("drafts" in snapshot).toBe(false);
@@ -254,5 +263,180 @@ describe("IndexedDB persistence and atomic mutation", () => {
     ).toBe(30000);
     expect((await db.settings.get("main"))?.openingLiquidBalance).toBe(0);
     expect((await db.balanceAdjustments.toArray())[0].difference).toBe(-20000);
+  });
+  it("restores expanded records with provider authorization disabled and no credentials", async () => {
+    const data = await readAppData();
+    data.financialConnections = [
+      {
+        ...stamped,
+        id: "connection",
+        providerId: "mock",
+        status: "connected",
+        institutionIds: [],
+        consentedAt: stamped.createdAt,
+      },
+    ];
+    data.syncStates = [
+      {
+        id: "connection",
+        lastAttemptAt: stamped.createdAt,
+        lastSuccessAt: stamped.createdAt,
+        nextRefreshAllowedAt: null,
+        status: "idle",
+        message: "",
+      },
+    ];
+    await restoreAppData(data);
+    expect((await db.financialConnections.get("connection"))?.status).toBe(
+      "disconnected",
+    );
+    expect((await db.syncStates.get("connection"))?.status).toBe(
+      "reauthentication",
+    );
+    expect(await db.providerCredentials.count()).toBe(0);
+    validateData(await readAppData());
+  });
+  it("deletes and restores imported expenses without orphaning receipts or recreating ignored imports", async () => {
+    await db.financialConnections.put({
+      ...stamped,
+      id: "connection",
+      providerId: "mock",
+      status: "connected",
+      institutionIds: [],
+      consentedAt: stamped.createdAt,
+    });
+    await db.accounts.put({
+      ...stamped,
+      id: "account",
+      name: "架空口座",
+      kind: "BANK",
+      institutionName: "",
+      currency: "JPY",
+      snapshotBalance: 30000,
+      balanceAsOf: "2026-09-24",
+      snapshotRecordedAt: stamped.createdAt,
+      balanceSource: "provider",
+      providerId: "mock",
+      connectionId: "connection",
+      externalAccountId: "bank",
+      isSpendable: true,
+      isActive: true,
+      automationLevel: "automatic",
+    });
+    await db.receipts.put({
+      ...stamped,
+      id: "receipt",
+      mimeType: "image/jpeg",
+      imageBase64: "AA==",
+    });
+    const imported = expense({
+      receiptId: "receipt",
+      sourceAccountId: "account",
+      providerId: "mock",
+      connectionId: "connection",
+      externalTransactionId: "external",
+      balanceEffect: "snapshot",
+    });
+    await db.externalTransactions.put({
+      ...stamped,
+      id: "raw",
+      providerId: "mock",
+      connectionId: "connection",
+      externalTransactionId: "external",
+      externalAccountId: "bank",
+      accountId: "account",
+      date: imported.date,
+      amount: -1280,
+      description: "架空支出",
+      currency: "JPY",
+      pendingStatus: "posted",
+      externalUpdatedAt: stamped.createdAt,
+      kind: "unclassified",
+    });
+    await saveExpense(imported);
+    validateData(await readAppData());
+    const deleted = await deleteExpense(imported.id);
+    expect((await db.externalTransactions.get("raw"))?.kind).toBe("ignored");
+    expect((await db.receipts.get("receipt"))?.expenseId).toBeUndefined();
+    validateData(await readAppData());
+    await saveExpense(deleted!);
+    expect(await db.externalTransactions.get("raw")).toMatchObject({
+      kind: "expense",
+      linkedRecordId: imported.id,
+    });
+    expect((await db.receipts.get("receipt"))?.expenseId).toBe(imported.id);
+    validateData(await readAppData());
+  });
+  it("keeps full backup restore, learning and clear atomic inside the encrypted vault", async () => {
+    await updateSettings({ openingLiquidBalance: 30000 });
+    await saveExpense(expense());
+    await db.drafts.put({
+      id: "expense",
+      value: "fictional unfinished amount",
+    });
+    await initializeVault("a separate test vault passphrase");
+    await db.providerCredentials.bulkPut([
+      { id: "moneytree:default", value: "fictional authorization" },
+      { id: "moneytree:secondary", value: "fictional second authorization" },
+    ]);
+    const snapshot = await readAppData();
+    const before = computeFinance(snapshot, "2026-09-24");
+    const events: Event[] = [];
+    const held = new Set<string>();
+    const acquired: string[] = [];
+    const target = new EventTarget();
+    target.addEventListener("pace:financial-reset", (event) =>
+      events.push(event),
+    );
+    vi.stubGlobal("window", target);
+    vi.stubGlobal("navigator", {
+      locks: {
+        async request(name: string, action: () => Promise<unknown>) {
+          acquired.push(name);
+          held.add(name);
+          try {
+            return await action();
+          } finally {
+            held.delete(name);
+          }
+        },
+      },
+    });
+    let writes = 0;
+    const checkResetLock = () => {
+      expect(events.length).toBeGreaterThan(0);
+      expect(held.has("pace:moneytree:state:moneytree:default")).toBe(true);
+      writes++;
+    };
+    db.settings.hook("creating", checkResetLock);
+    try {
+      await clearAllData();
+      expect(await db.providerCredentials.count()).toBe(0);
+      expect(await getVaultStatus()).toEqual({ enabled: true, unlocked: true });
+      await restoreAppData(snapshot);
+      expect(await db.providerCredentials.count()).toBe(0);
+      expect(events.map((event) => event.type)).toEqual([
+        "pace:financial-reset",
+        "pace:financial-reset",
+      ]);
+      expect(events.every((event) => !("detail" in event))).toBe(true);
+      expect(acquired).toEqual([
+        "pace:moneytree:state:moneytree:default",
+        "pace:moneytree:state:moneytree:secondary",
+        "pace:moneytree:state:moneytree:default",
+      ]);
+      expect(writes).toBe(2);
+      expect(held.size).toBe(0);
+    } finally {
+      db.settings.hook("creating").unsubscribe(checkResetLock);
+      vi.unstubAllGlobals();
+    }
+    expect(computeFinance(await readAppData(), "2026-09-24")).toEqual(before);
+    expect(await db.drafts.count()).toBe(0);
+    expect((await db.merchantRules.get("サイゼリヤ"))?.categoryId).toBe("food");
+    lockVault();
+    await expect(readAppData()).rejects.toThrow("パスフレーズ");
+    await unlockVault("a separate test vault passphrase");
+    expect(computeFinance(await readAppData(), "2026-09-24")).toEqual(before);
   });
 });

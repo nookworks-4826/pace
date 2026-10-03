@@ -1,3 +1,5 @@
+> この文書は1.x時点の記録です。2.0の仕様・検証結果は[金融管理の完成報告](FINANCIAL-AUTOMATION.md)と[暗号化の構成](PRIVACY-AND-ENCRYPTION.md)を参照してください。
+
 # パスキーでPaceを開く
 
 v1.2.0から、パスキーを登録してアプリのロックを解除できます。Galaxyの指紋認証、iPhoneのFace ID・Touch IDなど、端末が提示する本人確認方法を使います。端末のPIN・パスコードが表示される場合もあります。

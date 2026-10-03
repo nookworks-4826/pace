@@ -5,9 +5,10 @@ import {
   encryptBackup,
   buildCSV,
   buildExcel,
+  bytesToBase64,
 } from "../domain/backup";
 import type { AppData } from "../types";
-import { APP_VERSION } from "../types";
+import { APP_VERSION, SCHEMA_VERSION } from "../types";
 
 const now = "2026-09-24T04:00:00.000Z";
 const stamp = { createdAt: now, updatedAt: now };
@@ -89,14 +90,262 @@ function fixture(): AppData {
     favorites: [],
   };
 }
+function automatedFixture(): AppData {
+  const data = fixture();
+  data.financialConnections = [
+    {
+      ...stamp,
+      id: "connection",
+      providerId: "mock",
+      status: "connected",
+      institutionIds: ["fictional-bank"],
+      consentedAt: now,
+    },
+  ];
+  data.accounts = [
+    {
+      ...stamp,
+      id: "bank",
+      name: "架空銀行",
+      kind: "BANK",
+      institutionName: "架空銀行",
+      currency: "JPY",
+      snapshotBalance: 30000,
+      balanceAsOf: "2026-09-24",
+      snapshotRecordedAt: now,
+      balanceSource: "provider",
+      providerId: "mock",
+      connectionId: "connection",
+      externalAccountId: "ext-bank",
+      isSpendable: true,
+      isActive: true,
+      automationLevel: "automatic",
+    },
+    {
+      ...stamp,
+      id: "cash",
+      name: "現金",
+      kind: "CASH",
+      institutionName: "",
+      currency: "JPY",
+      snapshotBalance: 5000,
+      balanceAsOf: "2026-09-24",
+      snapshotRecordedAt: now,
+      balanceSource: "manual",
+      isSpendable: true,
+      isActive: true,
+      automationLevel: "semi",
+    },
+    {
+      ...stamp,
+      id: "credit",
+      name: "架空カード",
+      kind: "CREDIT_CARD",
+      institutionName: "",
+      currency: "JPY",
+      snapshotBalance: 1000,
+      balanceAsOf: "2026-09-24",
+      snapshotRecordedAt: now,
+      balanceSource: "manual",
+      creditCardId: "c1",
+      isSpendable: false,
+      isActive: true,
+      automationLevel: "manual",
+    },
+  ];
+  data.expenses[0].sourceAccountId = "credit";
+  data.expenses[0].paymentChannel = "applePay";
+  data.expenses[0].receiptId = "receipt";
+  data.transfers = [
+    {
+      ...stamp,
+      id: "atm",
+      fromAccountId: "bank",
+      toAccountId: "cash",
+      amount: 10000,
+      date: "2026-09-24",
+      memo: "ATM出金",
+      fromBalanceEffect: "snapshot",
+      toBalanceEffect: "ledger",
+      status: "confirmed",
+    },
+  ];
+  data.externalTransactions = [
+    {
+      ...stamp,
+      id: "refund",
+      providerId: "mock",
+      connectionId: "connection",
+      externalTransactionId: "refund-external",
+      externalAccountId: "ext-bank",
+      accountId: "bank",
+      date: "2026-09-24",
+      amount: 280,
+      description: "返金",
+      currency: "JPY",
+      pendingStatus: "posted",
+      externalUpdatedAt: now,
+      kind: "refund",
+      relatedExpenseId: "e1",
+    },
+  ];
+  data.syncStates = [
+    {
+      id: "connection",
+      lastAttemptAt: now,
+      lastSuccessAt: now,
+      nextRefreshAllowedAt: now,
+      status: "idle",
+      message: "",
+    },
+  ];
+  data.receipts = [
+    {
+      ...stamp,
+      id: "receipt",
+      expenseId: "e1",
+      mimeType: "image/jpeg",
+      imageBase64: "AA==",
+    },
+  ];
+  data.salaryRules = [
+    {
+      ...stamp,
+      id: "salary-rule",
+      accountId: "bank",
+      normalizedDescription: "架空給与",
+      enabled: true,
+    },
+  ];
+  data.financialAudits = [
+    {
+      ...stamp,
+      id: "audit",
+      action: "match",
+      recordId: "atm",
+      detail: "振替として確認",
+    },
+  ];
+  data.accountAdjustments = [
+    {
+      ...stamp,
+      id: "adjustment",
+      accountId: "cash",
+      previousBalance: 5500,
+      newBalance: 5000,
+      date: "2026-09-24",
+      memo: "現金確認",
+    },
+  ];
+  data.settings.budgetCycle = { mode: "salary", startDay: 10 };
+  return data;
+}
 describe("complete local backups", () => {
+  it("round-trips account automation, receipts, transfers and salary rules without credentials", async () => {
+    const data = automatedFixture();
+    const backup = createBackup(data);
+    expect(await parseBackup(backup)).toEqual(data);
+    expect(
+      await parseBackup(
+        await encryptBackup(data, "safe independent backup password"),
+        "safe independent backup password",
+      ),
+    ).toEqual(data);
+    expect(backup).not.toContain("accessToken");
+    expect(backup).not.toContain("providerCredentials");
+    expect(() =>
+      createBackup({
+        ...data,
+        providerCredentials: [{ id: "moneytree", value: "secret" }],
+      } as AppData),
+    ).toThrow();
+  });
+  it("rejects orphan account, receipt and external transaction references before any restore", () => {
+    for (const mutate of [
+      (data: AppData) => {
+        data.transfers![0].toAccountId = "missing";
+      },
+      (data: AppData) => {
+        data.externalTransactions![0].connectionId = "missing";
+      },
+      (data: AppData) => {
+        data.expenses[0].receiptId = "missing";
+      },
+      (data: AppData) => {
+        data.accounts![2].isSpendable = true;
+      },
+      (data: AppData) => {
+        data.salaryRules![0].accountId = "missing";
+      },
+      (data: AppData) => {
+        data.receipts![0].imageBase64 = "incomplete";
+      },
+      (data: AppData) => {
+        data.externalTransactions!.push({
+          ...data.externalTransactions![0],
+          id: "duplicate",
+        });
+      },
+    ]) {
+      const data = automatedFixture();
+      mutate(data);
+      expect(() => createBackup(data)).toThrow();
+    }
+  });
+  it("reads old 310,000-round encrypted backups while new exports use 600,000 rounds", async () => {
+    const data = fixture();
+    const envelope = JSON.parse(createBackup(data));
+    envelope.schemaVersion = 1;
+    envelope.metadata.schemaVersion = 1;
+    const password = "fictional legacy backup password";
+    const encoder = new TextEncoder();
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const material = await crypto.subtle.importKey(
+      "raw",
+      encoder.encode(password),
+      "PBKDF2",
+      false,
+      ["deriveKey"],
+    );
+    const key = await crypto.subtle.deriveKey(
+      { name: "PBKDF2", hash: "SHA-256", salt, iterations: 310_000 },
+      material,
+      { name: "AES-GCM", length: 256 },
+      false,
+      ["encrypt"],
+    );
+    const ciphertext = await crypto.subtle.encrypt(
+      {
+        name: "AES-GCM",
+        iv,
+        additionalData: encoder.encode("pace-encrypted:v1"),
+      },
+      key,
+      encoder.encode(JSON.stringify(envelope)),
+    );
+    const oldBackup = JSON.stringify({
+      format: "pace-encrypted",
+      version: 1,
+      algorithm: "AES-GCM",
+      kdf: "PBKDF2-SHA256",
+      iterations: 310_000,
+      salt: bytesToBase64(salt),
+      iv: bytesToBase64(iv),
+      ciphertext: bytesToBase64(new Uint8Array(ciphertext)),
+    });
+    expect(await parseBackup(oldBackup, password)).toEqual(data);
+    expect(JSON.parse(await encryptBackup(data, password)).iterations).toBe(
+      600_000,
+    );
+  }, 15_000);
   it("round-trips all financial records and nullable settings with metadata", async () => {
     const data = fixture();
     data.settings.openingLiquidBalance = null;
     const json = createBackup(data);
     expect(JSON.parse(json)).toMatchObject({
-      schemaVersion: 1,
-      metadata: { appVersion: APP_VERSION, schemaVersion: 1 },
+      schemaVersion: SCHEMA_VERSION,
+      metadata: { appVersion: APP_VERSION, schemaVersion: SCHEMA_VERSION },
     });
     expect(await parseBackup(json)).toEqual(data);
     expect(json).not.toContain("credentialId");
@@ -228,6 +477,10 @@ describe("complete local backups", () => {
     const brokenSavings = structuredClone(data);
     brokenSavings.savingsContributions[0].savingsGoalId = "missing";
     expect(() => createBackup(brokenSavings)).toThrow();
+    // Legacy rows did not carry stamps; the current management UI adds them.
+    data.repayments[0] = { ...data.repayments[0], ...stamp };
+    data.savingsContributions[0] = { ...data.savingsContributions[0], ...stamp };
+    expect(await parseBackup(createBackup(data))).toEqual(data);
   });
   it("rejects invalid and unsupported backups before restoration", async () => {
     await expect(parseBackup("{")).rejects.toThrow("読み込めません");
@@ -446,9 +699,63 @@ describe("complete local backups", () => {
       parseBackup(JSON.stringify(tampered), "correct horse battery"),
     ).rejects.toThrow("復号できません");
     await expect(encryptBackup(data, "123")).rejects.toThrow("8");
-  });
+  }, 15_000);
 });
 describe("portable spreadsheet exports", () => {
+  it("exports transfer and refunds independently from consumed expenses", async () => {
+    const data = automatedFixture();
+    const csv = buildCSV(data);
+    expect(csv).toContain('"口座","取得元","取引種別","入力方法"');
+    const lines = csv.split("\r\n");
+    expect(lines.filter((line) => line.includes('"expense"'))).toHaveLength(1);
+    expect(lines.find((line) => line.includes('"transfer"'))).toContain(
+      '"振替"',
+    );
+    expect(lines.find((line) => line.includes('"refund"'))).toContain('"返金"');
+    const { default: ExcelJS } = await import("exceljs");
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(await (await buildExcel(data)).arrayBuffer());
+    expect(workbook.getWorksheet("支出")?.rowCount).toBe(2);
+    expect(workbook.getWorksheet("振替")?.getCell("D2").value).toBe(10000);
+    expect(workbook.getWorksheet("返金・未分類")?.getCell("D2").value).toBe(
+      280,
+    );
+    expect(workbook.getWorksheet("月別集計")?.getCell("C2").value).toBe(1000);
+    expect(workbook.getWorksheet("月別集計")?.getCell("G2").value).toBe(280);
+    expect(workbook.getWorksheet("カテゴリー別集計")?.getCell("C2").value).toBe(
+      1000,
+    );
+    const summary = workbook.getWorksheet("概要")!;
+    const rows: unknown[][] = [];
+    summary.eachRow((row) => {
+      rows.push(row.values as unknown[]);
+    });
+    expect(
+      rows.find((row) => row.includes("生活支出（返金差引後）")),
+    ).toContain(1000);
+    // A refund remains a dated spending correction even after its original
+    // expense was removed; category totals must still reconcile with the summary.
+    data.externalTransactions![0].relatedExpenseId = undefined;
+    expect(
+      buildCSV(data)
+        .split("\r\n")
+        .find((line) => line.includes('"refund"')),
+    ).toContain('"未分類"');
+    const unlinked = new ExcelJS.Workbook();
+    await unlinked.xlsx.load(await (await buildExcel(data)).arrayBuffer());
+    expect(unlinked.getWorksheet("カテゴリー別集計")?.getCell("C2").value).toBe(
+      1280,
+    );
+    expect(unlinked.getWorksheet("カテゴリー別集計")?.getCell("A3").value).toBe(
+      "未分類",
+    );
+    expect(unlinked.getWorksheet("カテゴリー別集計")?.getCell("C3").value).toBe(
+      -280,
+    );
+    expect(unlinked.getWorksheet("返金・未分類")?.getCell("E2").value).toBe(
+      "未分類",
+    );
+  });
   it("writes BOM CSV with escaped text and protects spreadsheet formula injection", () => {
     const data = fixture();
     data.expenses[0].merchant = '=HYPERLINK("bad", "click")';
@@ -460,7 +767,7 @@ describe("portable spreadsheet exports", () => {
     expect(csv).toContain('"カード"');
     expect(csv).toContain('"収入"');
   });
-  it("produces a valid XLSX with the eight required sheets and typed numeric cells", async () => {
+  it("produces a valid XLSX with financial detail sheets and typed numeric cells", async () => {
     const data = fixture();
     data.expenses[0].merchant = "=1+1";
     const blob = await buildExcel(data);
@@ -476,6 +783,10 @@ describe("portable spreadsheet exports", () => {
       "固定費",
       "月別集計",
       "カテゴリー別集計",
+      "口座",
+      "振替",
+      "金融明細",
+      "返金・未分類",
     ]);
     expect(workbook.getWorksheet("支出")?.getCell("D2").value).toBe(1280);
     expect(workbook.getWorksheet("支出")?.getCell("C2").value).toBe("=1+1");

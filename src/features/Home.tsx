@@ -41,14 +41,22 @@ export function Home() {
   const allocation = moneyAllocation(f);
   const negative = f.safeToSpend !== null && f.safeToSpend < 0;
   const attention = !negative && f.pace.ratio !== null && f.pace.ratio > 1.25;
-  const remainingDays =
-    new Date(
-      Number(today.slice(0, 4)),
-      Number(today.slice(5, 7)),
-      0,
-    ).getDate() -
-    Number(today.slice(8)) +
-    1;
+  const remainingDays = f.cycle.remainingDaysIncludingToday;
+  const salaryCycle = f.cycle.mode === "salary";
+  const todayBudgetSpent = salaryCycle
+    ? f.todayDiscretionarySpent
+    : f.todaySpent;
+  const currentIncome = salaryCycle
+    ? f.periodIncomeTotal
+    : f.monthlyIncomeTotal;
+  const currentExpenses = salaryCycle
+    ? f.periodExpenseTotal
+    : f.monthlyExpenseTotal;
+  const currentBudget = salaryCycle ? f.periodBudget : f.monthlyBudget;
+  const currentBudgetRemaining = salaryCycle
+    ? f.periodBudgetRemaining
+    : f.monthlyBudgetRemaining;
+  const accountMode = data.settings.financialAutomationEnabled === true;
   const dateLabel = new Intl.DateTimeFormat("ja-JP", {
     month: "long",
     day: "numeric",
@@ -129,7 +137,8 @@ export function Home() {
       id: "balance",
       label: "現在残高",
       ok: f.liquidBalance !== null,
-      action: () => setEditor({ mode: "balance" }),
+      action: () =>
+        accountMode ? navigate("/money") : setEditor({ mode: "balance" }),
     },
     {
       id: "salary",
@@ -219,9 +228,11 @@ export function Home() {
         </div>
         {f.safeToSpend === null ? (
           <div className="hero-unset">
-            現在残高を入力すると
+            {f.accountingWarnings[0] ?? "現在残高を入力すると"}
             <br />
-            計算できます
+            {f.accountingWarnings.length
+              ? "内訳から確認できます"
+              : "計算できます"}
           </div>
         ) : (
           <>
@@ -242,7 +253,7 @@ export function Home() {
                 ? `不足 ${yen(-f.safeToSpend)}`
                 : completed < 5
                   ? "未確認の情報があります · 暫定"
-                  : f.monthlyBudget !== null
+                  : currentBudget !== null
                     ? f.pace.label
                     : "予定のお金を確保しています"}
             </div>
@@ -273,6 +284,23 @@ export function Home() {
           <ChevronRight size={16} />
         </div>
       </button>
+      {accountMode && (
+        <div className="info-pair">
+          <Link className="text-button" to="/money">
+            使える資産の内訳 <ChevronRight size={15} />
+          </Link>
+          <Link className="text-button" to="/financial">
+            {f.lastFinancialUpdatedAt
+              ? `${new Intl.DateTimeFormat("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }).format(new Date(f.lastFinancialUpdatedAt))}時点`
+              : "金融機関"}
+          </Link>
+        </div>
+      )}
+      {f.financialDataIsStale && (
+        <p className="notice">
+          情報が古い可能性があります。金融機関から更新できます。
+        </p>
+      )}
       <section className="today-card surface">
         <div className="today-top">
           <div>
@@ -304,8 +332,8 @@ export function Home() {
         <Progress
           value={
             f.dailyAllowance
-              ? (f.todaySpent / f.dailyAllowance) * 100
-              : f.todaySpent > 0
+              ? (todayBudgetSpent / f.dailyAllowance) * 100
+              : todayBudgetSpent > 0
                 ? 100
                 : 0
           }
@@ -313,18 +341,21 @@ export function Home() {
         />
         <div className="today-bottom">
           <span>
-            今日使った額 <b>{yen(f.todaySpent)}</b>
+            {salaryCycle ? "今日の支出（固定費以外）" : "今日使った額"}{" "}
+            <b>{yen(salaryCycle ? f.todayDiscretionarySpent : f.todaySpent)}</b>
           </span>
           <span>
             {f.dailyAllowance
-              ? `${Math.round((f.todaySpent / f.dailyAllowance) * 100)}%`
+              ? `${Math.round((todayBudgetSpent / f.dailyAllowance) * 100)}%`
               : "—"}
           </span>
         </div>
         {f.dailyAllowance === null ? (
           <button
             className="text-button"
-            onClick={() => setEditor({ mode: "balance" })}
+            onClick={() =>
+              accountMode ? navigate("/money") : setEditor({ mode: "balance" })
+            }
           >
             現在残高を入力する
             <ArrowUpRight size={15} />
@@ -333,11 +364,23 @@ export function Home() {
           <p className="daily-caption">
             {negative
               ? "予定を含めると残高が不足しています。内訳を確認できます。"
-              : f.todaySpent > f.dailyAllowance
-                ? `今日の目安を${yen(f.todaySpent - f.dailyAllowance)}上回っています。`
-                : `月末まであと${remainingDays}日。今日の時点で再計算しています。`}
+              : f.overspentToday !== null && f.overspentToday > 0
+                ? `今日の目安を${yen(f.overspentToday)}上回っています。`
+                : `${salaryCycle ? "今期" : "月末"}まであと${remainingDays}日。`}
           </p>
         )}
+        <div className="info-pair">
+          <span>明日の目安</span>
+          <strong>
+            {f.tomorrowAllowance === null ? "—" : yen(f.tomorrowAllowance)}
+          </strong>
+        </div>
+        <p className="hint">
+          {f.tomorrowAllowance === null &&
+          f.cycle.remainingDaysIncludingToday === 1
+            ? "次の期間の入金・予定を確認してから計算します。"
+            : "今日を目安内に収めた場合"}
+        </p>
       </section>
       <button
         className="button button-primary primary-add"
@@ -393,17 +436,27 @@ export function Home() {
           </p>
         )}
       <SectionTitle
-        title={`${Number(today.slice(5, 7))}月のまとめ`}
+        title={
+          salaryCycle
+            ? "今期のまとめ"
+            : `${Number(today.slice(5, 7))}月のまとめ`
+        }
         action="分析を見る"
         onClick={() => navigate("/analytics")}
       />
+      {salaryCycle && (
+        <p className="hint">
+          {f.cycle.start.replaceAll("-", "/")}〜
+          {f.cycle.end.replaceAll("-", "/")}
+        </p>
+      )}
       <div className="month-summary surface">
         <div>
           <span>
             <ArrowDownLeft size={15} />
             収入
           </span>
-          <strong>{yen(f.monthlyIncomeTotal)}</strong>
+          <strong>{yen(currentIncome)}</strong>
           <button
             className="text-button"
             onClick={() => setEditor({ mode: "income" })}
@@ -416,21 +469,21 @@ export function Home() {
             <ArrowUpRight size={15} />
             生活支出
           </span>
-          <strong>{yen(f.monthlyExpenseTotal)}</strong>
+          <strong>{yen(currentExpenses)}</strong>
           <small>カード購入を含む</small>
         </div>
         <div>
-          <span>今月あと</span>
+          <span>{salaryCycle ? "今期あと" : "今月あと"}</span>
           <strong>
-            {f.monthlyBudgetRemaining === null
+            {currentBudgetRemaining === null
               ? "未設定"
-              : yen(f.monthlyBudgetRemaining)}
+              : yen(currentBudgetRemaining)}
           </strong>
           <button
             className="text-button"
             onClick={() => setEditor({ mode: "budget" })}
           >
-            {f.monthlyBudget === null ? "予算を設定" : "予算を変更"}
+            {currentBudget === null ? "予算を設定" : "予算を変更"}
           </button>
         </div>
         <div>
@@ -580,7 +633,8 @@ export function Home() {
       {details && (
         <Sheet title="今使っていい金額の内訳" onClose={() => setDetails(false)}>
           <p className="hint">
-            持っているお金から、すでに使った分と今月までに必要な予定を差し引きます。予想の給与は含みません。
+            持っているお金から、カード未払いと{salaryCycle ? "今期" : "今月"}
+            までに必要な予定を差し引きます。予想の給与は含みません。
           </p>
           <div className="breakdown">
             {[
@@ -588,7 +642,7 @@ export function Home() {
                 label: "現在使えるお金",
                 value: f.liquidBalance,
                 mode: "balance",
-                url: "",
+                url: accountMode ? "/money" : "",
               },
               {
                 label: "カード未払い",
@@ -601,12 +655,12 @@ export function Home() {
                 url: "/manage/recurring",
               },
               {
-                label: "今月の返済予定 · 残り",
+                label: `${salaryCycle ? "今期" : "今月"}の返済予定 · 残り`,
                 value: -f.debtReserve,
                 url: "/manage/debts",
               },
               {
-                label: "今月の貯金予定 · 残り",
+                label: `${salaryCycle ? "今期" : "今月"}の貯金予定 · 残り`,
                 value: -f.savingsReserve,
                 url: "/manage/savings",
               },
@@ -615,7 +669,7 @@ export function Home() {
                 key={row.label}
                 onClick={() => {
                   setDetails(false);
-                  if (row.mode) setEditor({ mode: "balance" });
+                  if (row.mode && !accountMode) setEditor({ mode: "balance" });
                   else navigate(row.url);
                 }}
               >
@@ -640,15 +694,16 @@ export function Home() {
             </p>
           )}
           <p className="hint">
-            今日の目安＝「今使っていい金額」と「今月の予算残り」の小さい方 ÷
-            今日を含む残り{remainingDays}
-            日（四捨五入）。予算がなければ使っていい金額から計算します。支出入力後に目安も更新されます。
+            {salaryCycle
+              ? "今日の記録前の自由資金を、今日を含む今期の残り日数で割ります。端数は切り捨て、今日使った分は残り枠から一度だけ差し引きます。"
+              : `使っていい金額と予算残りの小さい方を、今日を含む残り${remainingDays}日で割ります（四捨五入）。`}
           </p>
           <button
             className="button button-primary full"
             onClick={() => {
               setDetails(false);
-              setEditor({ mode: "balance" });
+              if (accountMode) navigate("/money");
+              else setEditor({ mode: "balance" });
             }}
           >
             残高を合わせる

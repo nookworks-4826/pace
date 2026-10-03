@@ -14,7 +14,7 @@ import {
 import { usePace } from "../app/context";
 import { Empty, Field, yen } from "../components/UI";
 import { deleteExpense, saveExpense } from "../db";
-import { monthEnd } from "../domain/dates";
+import { dateKey, monthEnd } from "../domain/dates";
 import { paymentLabels } from "../types";
 import type { Expense } from "../types";
 
@@ -25,11 +25,23 @@ export function ExpenseRow({
   expense: Expense;
   allowDelete?: boolean;
 }) {
-  const { data, openExpense, run, toast } = usePace();
+  const { data, today, openExpense, run, toast } = usePace();
   const category = data.categories.find((c) => c.id === expense.categoryId);
   const sub = category?.subcategories.find(
     (s) => s.id === expense.subcategoryId,
   );
+  const sourceAccount = data.accounts?.find(
+    (account) => account.id === expense.sourceAccountId,
+  );
+  const refunded = (data.externalTransactions ?? [])
+    .filter(
+      (row) =>
+        row.kind === "refund" &&
+        row.relatedExpenseId === expense.id &&
+        row.pendingStatus !== "pending" &&
+        dateKey(row.date) <= today,
+    )
+    .reduce((total, row) => total + Math.abs(row.amount), 0);
   const Icon =
     expense.categoryId === "food"
       ? sub?.name === "カフェ"
@@ -56,10 +68,19 @@ export function ExpenseRow({
           <b>{expense.merchant || expense.description || "支出"}</b>
           <small>
             {sub?.name || category?.name} ·{" "}
-            {expense.paymentMethod === "creditCard"
-              ? (data.cards.find((c) => c.id === expense.creditCardId)?.name ??
-                "カード")
-              : paymentLabels[expense.paymentMethod]}
+            {sourceAccount?.name ??
+              (expense.paymentMethod === "creditCard"
+                ? (data.cards.find((c) => c.id === expense.creditCardId)
+                    ?.name ?? "カード")
+                : paymentLabels[expense.paymentMethod])}
+            {expense.paymentChannel === "applePay" ? " · Apple Pay" : ""}
+            {expense.receiptId
+              ? " · レシート"
+              : expense.providerId === "moneytree"
+                ? " · 自動取得"
+                : expense.providerId === "mock"
+                  ? " · テスト明細"
+                  : ""}
           </small>
         </span>
         <span className="transaction-price">
@@ -67,6 +88,7 @@ export function ExpenseRow({
           <small>
             {Number(expense.date.slice(5, 7))}/{Number(expense.date.slice(8))}
           </small>
+          {refunded > 0 && <small>返金 +{yen(refunded)}</small>}
         </span>
       </button>
       {allowDelete && (
@@ -113,6 +135,7 @@ export function History() {
   const [category, setCategory] = useState(params.get("category") ?? "");
   const [card, setCard] = useState(params.get("card") ?? "");
   const [method, setMethod] = useState("");
+  const [account, setAccount] = useState(params.get("account") ?? "");
   const [from, setFrom] = useState(
     params.get("from") ?? (queryMonth ? `${queryMonth}-01` : ""),
   );
@@ -134,6 +157,9 @@ export function History() {
             c?.name,
             c?.subcategories.find((s) => s.id === e.subcategoryId)?.name,
             e.amount.toString(),
+            data.accounts?.find((row) => row.id === e.sourceAccountId)?.name,
+            data.cards.find((row) => row.id === e.creditCardId)?.name,
+            e.paymentChannel === "applePay" ? "Apple Pay" : "",
           ]
             .join(" ")
             .normalize("NFKC")
@@ -144,6 +170,7 @@ export function History() {
             (!category || e.categoryId === category) &&
             (!card || e.creditCardId === card) &&
             (!method || e.paymentMethod === method) &&
+            (!account || e.sourceAccountId === account) &&
             (!from || e.date >= from) &&
             (!to || e.date <= to) &&
             (!min || e.amount >= Number(min)) &&
@@ -155,9 +182,22 @@ export function History() {
             b.date.localeCompare(a.date) ||
             b.createdAt.localeCompare(a.createdAt),
         ),
-    [data, search, category, card, method, from, to, min, max],
+    [data, search, category, card, method, account, from, to, min, max],
   );
   const visible = filtered.slice(0, limit);
+  const filteredIds = new Set(filtered.map((row) => row.id));
+  const filteredRefundTotal = (data.externalTransactions ?? [])
+    .filter(
+      (row) =>
+        row.kind === "refund" &&
+        row.pendingStatus !== "pending" &&
+        row.date <= today &&
+        (!from || row.date >= from) &&
+        (!to || row.date <= to) &&
+        row.relatedExpenseId &&
+        filteredIds.has(row.relatedExpenseId),
+    )
+    .reduce((total, row) => total + Math.abs(row.amount), 0);
   const dates = Array.from(new Set(visible.map((e) => e.date)));
   const yesterday = new Date(`${today}T12:00:00+09:00`);
   yesterday.setUTCDate(yesterday.getUTCDate() - 1);
@@ -182,7 +222,7 @@ export function History() {
         <Search size={20} />
         <input
           aria-label="履歴を検索"
-          placeholder="店名・メモ・カテゴリー・金額"
+          placeholder="店名・金額・口座・メモ"
           value={search}
           onChange={(e) => {
             setSearch(e.target.value);
@@ -260,12 +300,28 @@ export function History() {
               ))}
             </select>
           </Field>
+          {(data.accounts?.length ?? 0) > 0 && (
+            <Field label="支払元">
+              <select
+                value={account}
+                onChange={(event) => setAccount(event.target.value)}
+              >
+                <option value="">すべて</option>
+                {data.accounts?.map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {row.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
           <button
             className="text-button"
             onClick={() => {
               setCategory("");
               setMethod("");
               setCard("");
+              setAccount("");
               setFrom("");
               setTo("");
               setMin("");
@@ -279,8 +335,17 @@ export function History() {
       )}
       <div className="history-total">
         <span>{filtered.length}件の生活支出</span>
-        <strong>{yen(filtered.reduce((s, e) => s + e.amount, 0))}</strong>
+        <strong>
+          {yen(
+            filtered.reduce((s, e) => s + e.amount, 0) - filteredRefundTotal,
+          )}
+        </strong>
       </div>
+      {filteredRefundTotal > 0 && (
+        <p className="hint">
+          関連する返金 {yen(filteredRefundTotal)} を差し引いています。
+        </p>
+      )}
       {filtered.length === 0 ? (
         <Empty
           icon={<Receipt />}

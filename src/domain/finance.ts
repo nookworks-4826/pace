@@ -12,11 +12,21 @@ import {
   dateKey,
   dateOnDay,
   daysInMonth,
-  monthEnd,
   monthKey,
   remainingDaysIncludingToday,
   todayJST,
 } from "./dates";
+import {
+  getBudgetCycle,
+  getCycleBudgetMonth,
+  isInBudgetCycle,
+  type BudgetCycle,
+} from "./budgetCycle";
+import {
+  calculateAccountBalance,
+  getAccountBalances,
+  getAccountTotals,
+} from "./accounts";
 
 export const MAX_MONEY = 999_999_999_999;
 export function assertMoney(value: number, allowZero = false): void {
@@ -45,11 +55,36 @@ function happened(value: string, today: string): boolean {
 function inMonth(value: string, today: string): boolean {
   return monthKey(value) === monthKey(today) && happened(value, today);
 }
+function inPeriod(value: string, today: string, cycle: BudgetCycle): boolean {
+  return isInBudgetCycle(value, cycle) && happened(value, today);
+}
+/** Refunds are dated spending corrections, not income and not a second balance change. */
+export function calculateRefundTotal(
+  data: AppData,
+  from: string,
+  to: string,
+): number {
+  return sum(
+    (data.externalTransactions ?? [])
+      .filter(
+        (row) =>
+          row.kind === "refund" &&
+          row.pendingStatus !== "pending" &&
+          dateKey(row.date) >= dateKey(from) &&
+          dateKey(row.date) <= dateKey(to),
+      )
+      .map((row) => Math.abs(row.amount)),
+  );
+}
+export function isAccountMode(data: AppData): boolean {
+  return data.settings.financialAutomationEnabled === true;
+}
 
 export function calculateLiquidBalance(
   data: AppData,
   today = todayJST(),
 ): number | null {
+  if (isAccountMode(data)) return getAccountTotals(data, today).spendableAssets;
   if (data.settings.openingLiquidBalance === null) return null;
   return sum([
     data.settings.openingLiquidBalance,
@@ -86,6 +121,23 @@ export function calculateCardLedger(
   cardId: string,
   today = todayJST(),
 ): number {
+  if (isAccountMode(data)) {
+    const account = data.accounts?.find(
+      (row) => row.kind === "CREDIT_CARD" && row.creditCardId === cardId,
+    );
+    if (account) {
+      const balance = calculateAccountBalance(data, account, today);
+      if (balance !== null) return balance;
+    }
+  }
+  return calculateLegacyCardLedger(data, cardId, today);
+}
+
+export function calculateLegacyCardLedger(
+  data: AppData,
+  cardId: string,
+  today = todayJST(),
+): number {
   const card = data.cards.find((row) => row.id === cardId);
   return sum([
     card?.openingOutstanding ?? 0,
@@ -108,6 +160,24 @@ export function calculateCardOutstanding(
   today = todayJST(),
 ): number {
   if (cardId) return Math.max(0, calculateCardLedger(data, cardId, today));
+  if (isAccountMode(data)) {
+    const accounts = (data.accounts ?? []).filter(
+      (row) => row.kind === "CREDIT_CARD",
+    );
+    const mappedCardIds = new Set(
+      accounts.flatMap((row) => (row.creditCardId ? [row.creditCardId] : [])),
+    );
+    return sum([
+      ...accounts.map((row) =>
+        Math.max(0, calculateAccountBalance(data, row, today) ?? 0),
+      ),
+      ...data.cards
+        .filter((row) => !mappedCardIds.has(row.id))
+        .map((row) =>
+          Math.max(0, calculateLegacyCardLedger(data, row.id, today)),
+        ),
+    ]);
+  }
   // Inactive cards still have a liability. Never silently erase it by hiding a card.
   return sum(
     data.cards.map((card) =>
@@ -137,28 +207,37 @@ export function nextDebtPayment(
   debt: Debt,
   today = todayJST(),
 ): { date: string; amount: number } | null {
+  if (debt.reserveForCurrentBudget === false) return null;
   if (!debt.nextPaymentDate || debt.plannedMonthlyPayment <= 0) return null;
   const balance = calculateDebtBalance(debt, data.repayments, today);
   if (balance <= 0) return null;
   const earliest = dateKey(debt.nextPaymentDate);
   const day = Number(earliest.slice(8, 10));
   // An explicit later first date must never be pulled back into the present month.
-  if (earliest > monthEnd(today))
+  const cycle = getBudgetCycle(today, data.settings.budgetCycle);
+  if (earliest > cycle.end)
     return {
       date: earliest,
       amount: Math.min(balance, debt.plannedMonthlyPayment),
     };
   const paidThisMonth = sum(
     data.repayments
-      .filter((row) => row.debtId === debt.id && inMonth(row.date, today))
+      .filter(
+        (row) => row.debtId === debt.id && inPeriod(row.date, today, cycle),
+      )
       .map((row) => row.amount),
   );
   const remaining = Math.max(0, debt.plannedMonthlyPayment - paidThisMonth);
-  let dueDate = dateOnDay(monthKey(today), day);
+  let dueDate = dateOnDay(monthKey(cycle.start), day);
+  if (dueDate < cycle.start)
+    dueDate = dateOnDay(
+      monthKey(addMonthsDate(`${monthKey(cycle.start)}-01`, 1)),
+      day,
+    );
   if (remaining === 0 || dueDate < dateKey(debt.startedAt)) {
     // Calculate from the configured day again: February 28 must not turn March 31 into March 28.
     dueDate = dateOnDay(
-      monthKey(addMonthsDate(`${monthKey(today)}-01`, 1)),
+      monthKey(addMonthsDate(`${monthKey(dueDate)}-01`, 1)),
       day,
     );
     return {
@@ -189,18 +268,23 @@ export function calculateDebtPaymentReserve(
   data: AppData,
   today = todayJST(),
 ): number {
+  const cycle = getBudgetCycle(today, data.settings.budgetCycle);
   return sum(
     data.debts
-      .filter((debt) => happened(debt.startedAt, today))
+      .filter(
+        (debt) =>
+          happened(debt.startedAt, today) &&
+          debt.reserveForCurrentBudget !== false,
+      )
       .map((debt) => {
-        if (
-          debt.nextPaymentDate &&
-          dateKey(debt.nextPaymentDate) > monthEnd(today)
-        )
+        if (debt.nextPaymentDate && dateKey(debt.nextPaymentDate) > cycle.end)
           return 0;
         const repaid = sum(
           data.repayments
-            .filter((row) => row.debtId === debt.id && inMonth(row.date, today))
+            .filter(
+              (row) =>
+                row.debtId === debt.id && inPeriod(row.date, today, cycle),
+            )
             .map((row) => row.amount),
         );
         return Math.min(
@@ -214,6 +298,7 @@ export function calculateSavingsReserve(
   data: AppData,
   today = todayJST(),
 ): number {
+  const cycle = getBudgetCycle(today, data.settings.budgetCycle);
   return sum(
     data.savingsGoals
       .filter((goal) => happened(goal.createdAt, today))
@@ -222,7 +307,8 @@ export function calculateSavingsReserve(
           data.savingsContributions
             .filter(
               (row) =>
-                row.savingsGoalId === goal.id && inMonth(row.date, today),
+                row.savingsGoalId === goal.id &&
+                inPeriod(row.date, today, cycle),
             )
             .map((row) => row.amount),
         );
@@ -250,7 +336,7 @@ export function getRecurringDue(
   data: AppData,
   today = todayJST(),
 ): RecurringDue[] {
-  const end = monthEnd(today);
+  const end = getBudgetCycle(today, data.settings.budgetCycle).end;
   const occurrenceMap = new Map(
     data.recurringOccurrences.map((row) => [row.id, row]),
   );
@@ -355,6 +441,10 @@ export function calculateBudgetPace(
   return { label, ratio, budgetProgress, timeProgress };
 }
 export function computeFinance(data: AppData, today = todayJST()) {
+  const cycle = getBudgetCycle(today, data.settings.budgetCycle);
+  const accountTotals = isAccountMode(data)
+    ? getAccountTotals(data, today)
+    : null;
   const liquidBalance = calculateLiquidBalance(data, today);
   const cardOutstanding = calculateCardOutstanding(data, undefined, today);
   const recurringDue = getRecurringDue(data, today);
@@ -362,17 +452,23 @@ export function computeFinance(data: AppData, today = todayJST()) {
   const debtReserve = calculateDebtPaymentReserve(data, today);
   const savingsReserve = calculateSavingsReserve(data, today);
   const safeToSpend = calculateSafeToSpend({
-    liquidBalance,
+    liquidBalance:
+      accountTotals && accountTotals.cardLiabilities === null
+        ? null
+        : liquidBalance,
     cardOutstanding,
     upcomingFixedCosts,
     debtReserve,
     savingsReserve,
   });
-  const monthlyExpenseTotal = sum(
-    data.expenses
-      .filter((row) => inMonth(row.date, today))
-      .map((row) => row.amount),
-  );
+  const monthlyExpenseTotal = sum([
+    sum(
+      data.expenses
+        .filter((row) => inMonth(row.date, today))
+        .map((row) => row.amount),
+    ),
+    -calculateRefundTotal(data, `${monthKey(today)}-01`, today),
+  ]);
   const monthlyIncomeTotal = sum(
     data.incomes
       .filter((row) => inMonth(row.date, today))
@@ -384,16 +480,149 @@ export function computeFinance(data: AppData, today = todayJST()) {
       ?.totalBudget ?? null;
   const monthlyBudgetRemaining =
     monthlyBudget === null ? null : monthlyBudget - monthlyExpenseTotal;
-  const dailyAllowance = calculateDailyAllowance(
-    safeToSpend,
-    monthlyBudgetRemaining,
-    today,
+  const periodExpenseTotal = sum([
+    sum(
+      data.expenses
+        .filter((row) => inPeriod(row.date, today, cycle))
+        .map((row) => row.amount),
+    ),
+    -calculateRefundTotal(data, cycle.start, today),
+  ]);
+  const periodIncomeTotal = sum(
+    data.incomes
+      .filter((row) => inPeriod(row.date, today, cycle))
+      .map((row) => row.amount),
   );
+  const cycleBudgetMonth = getCycleBudgetMonth(cycle);
+  const periodBudget =
+    data.budgets.find(
+      (row) =>
+        row.year === cycleBudgetMonth.year &&
+        row.month === cycleBudgetMonth.month,
+    )?.totalBudget ?? null;
+  const periodBudgetRemaining =
+    periodBudget === null ? null : periodBudget - periodExpenseTotal;
   const todaySpent = sum(
     data.expenses
       .filter((row) => dateKey(row.date) === dateKey(today))
       .map((row) => row.amount),
   );
+  const todayDiscretionarySpent = sum(
+    data.expenses
+      .filter((row) => dateKey(row.date) === dateKey(today) && !row.isFixedCost)
+      .map((row) => row.amount),
+  );
+  const available =
+    safeToSpend === null
+      ? null
+      : Math.max(0, Math.min(safeToSpend, periodBudgetRemaining ?? Infinity));
+  // In salary mode today has one allowance: recorded spending is added back once to recover its opening frame.
+  const dailyAllowance =
+    cycle.mode === "calendar"
+      ? calculateDailyAllowance(safeToSpend, monthlyBudgetRemaining, today)
+      : safeToSpend === null
+        ? null
+        : Math.floor(
+            Math.max(
+              0,
+              Math.min(
+                safeToSpend + todayDiscretionarySpent,
+                periodBudgetRemaining === null
+                  ? Infinity
+                  : periodBudgetRemaining + todayDiscretionarySpent,
+              ),
+            ) / cycle.remainingDaysIncludingToday,
+          );
+  const todayRemaining =
+    dailyAllowance === null
+      ? null
+      : Math.max(
+          0,
+          dailyAllowance -
+            (cycle.mode === "salary" ? todayDiscretionarySpent : todaySpent),
+        );
+  const tomorrowAllowance =
+    available === null || cycle.remainingDaysIncludingToday <= 1
+      ? null
+      : Math.floor(
+          Math.max(0, available - (todayRemaining ?? 0)) /
+            (cycle.remainingDaysIncludingToday - 1),
+        );
+  const overspentToday =
+    dailyAllowance === null
+      ? null
+      : Math.max(
+          0,
+          (cycle.mode === "salary" ? todayDiscretionarySpent : todaySpent) -
+            dailyAllowance,
+        );
+  const accountingWarnings = accountTotals
+    ? [
+        ...(accountTotals.hasUndistributedLegacyBalance
+          ? ["既存の合計残高を口座ごとに分けてください。"]
+          : []),
+        ...(accountTotals.unknownAccountIds.length
+          ? ["残高が未入力の口座があります。"]
+          : []),
+        ...(accountTotals.unallocatedRecordIds.length
+          ? ["支払元が未設定の記録があります。"]
+          : []),
+        ...(data.expenses.some(
+          (expense) =>
+            expense.pendingStatus === "pending" &&
+            expense.balanceEffect === "ledger" &&
+            dateKey(expense.date) <= dateKey(today) &&
+            accountTotals.balances.some(
+              ({ account }) =>
+                account.kind === "CREDIT_CARD" &&
+                account.balanceSource === "provider" &&
+                (expense.sourceAccountId === account.id ||
+                  (!expense.sourceAccountId &&
+                    expense.creditCardId === account.creditCardId)),
+            ),
+        )
+          ? [
+              "未確認のカード手入力があります。取り込んだ明細と確認すると確保額が合います。",
+            ]
+          : []),
+        ...(accountTotals.hasStaleData
+          ? ["金融情報が古い可能性があります。"]
+          : []),
+        ...(!accountTotals.balances.some(
+          (row) =>
+            !row.isLiability && row.account.isSpendable && row.account.isActive,
+        )
+          ? ["使える資産の口座を追加してください。"]
+          : []),
+      ]
+    : [];
+  const reconciliationAlerts = isAccountMode(data)
+    ? (data.accounts ?? [])
+        .filter(
+          (row) =>
+            row.kind === "CREDIT_CARD" &&
+            row.creditCardId &&
+            row.balanceSource === "provider",
+        )
+        .flatMap((account) => {
+          const providerBalance = calculateAccountBalance(data, account, today);
+          const ledgerBalance = calculateLegacyCardLedger(
+            data,
+            account.creditCardId!,
+            today,
+          );
+          return providerBalance !== null && providerBalance !== ledgerBalance
+            ? [
+                {
+                  accountId: account.id,
+                  providerBalance,
+                  ledgerBalance,
+                  difference: providerBalance - ledgerBalance,
+                },
+              ]
+            : [];
+        })
+    : [];
   return {
     liquidBalance,
     cardOutstanding,
@@ -407,11 +636,55 @@ export function computeFinance(data: AppData, today = todayJST()) {
     monthlyBudgetRemaining,
     dailyAllowance,
     todaySpent,
-    todayRemaining:
-      dailyAllowance === null ? null : Math.max(0, dailyAllowance - todaySpent),
-    pace: calculateBudgetPace(monthlyExpenseTotal, monthlyBudget, today),
+    todayRemaining,
+    todayDiscretionarySpent,
+    tomorrowAllowance,
+    overspentToday,
+    cycle,
+    periodExpenseTotal,
+    periodIncomeTotal,
+    periodBudget,
+    periodBudgetRemaining,
+    accountBalances: accountTotals?.balances ?? getAccountBalances(data, today),
+    totalAssets: accountTotals ? accountTotals.totalAssets : liquidBalance,
+    lastFinancialUpdatedAt: accountTotals?.lastUpdatedAt ?? null,
+    financialDataIsStale: accountTotals?.hasStaleData ?? false,
+    unknownAccountIds: accountTotals?.unknownAccountIds ?? [],
+    unallocatedRecordIds: accountTotals?.unallocatedRecordIds ?? [],
+    accountingWarnings,
+    reconciliationAlerts,
+    pace:
+      cycle.mode === "calendar"
+        ? calculateBudgetPace(monthlyExpenseTotal, monthlyBudget, today)
+        : calculateCyclePace(periodExpenseTotal, periodBudget, cycle),
     recurringDue,
   };
+}
+
+function calculateCyclePace(
+  expense: number,
+  budget: number | null,
+  cycle: BudgetCycle,
+) {
+  const timeProgress = cycle.elapsedDays / cycle.totalDays;
+  const budgetProgress =
+    budget === null
+      ? null
+      : budget === 0
+        ? expense === 0
+          ? 0
+          : Infinity
+        : expense / budget;
+  const ratio = budgetProgress === null ? null : budgetProgress / timeProgress;
+  const label =
+    ratio === null
+      ? "予算を設定できます"
+      : ratio <= 1
+        ? "予定ペース"
+        : ratio < 1.25
+          ? "少し早め"
+          : "ペース注意";
+  return { label, ratio, budgetProgress, timeProgress };
 }
 
 /** Statement allocation is an estimate: users confirm the actual debit amount. */

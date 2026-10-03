@@ -31,6 +31,22 @@ const stamp = { id, createdAt: date, updatedAt: date };
 const method = z.enum(["cash", "debit", "bank", "creditCard", "other"]);
 const category = { categoryId: id, subcategoryId: z.string().max(300) };
 const payment = { paymentMethod: method, creditCardId: id.optional() };
+const sourceAccount = { sourceAccountId: id.optional() };
+const paymentChannel = z.enum(["direct", "applePay", "other"]).optional();
+const providerId = z.enum(["moneytree", "manual", "mock"]);
+const balanceEffect = z.enum(["snapshot", "ledger"]).optional();
+const externalMetadata = {
+  providerId: providerId.optional(),
+  connectionId: id.optional(),
+  externalTransactionId: id.optional(),
+  externalAccountId: id.optional(),
+  pendingStatus: z.enum(["pending", "posted", "unknown"]).optional(),
+  originalCurrency: z.string().min(1).max(10).optional(),
+  originalAmount: z.number().finite().min(-MAX_MONEY).max(MAX_MONEY).optional(),
+  finalJPYAmount: money.optional(),
+  feeAmount: money.optional(),
+  balanceEffect,
+};
 const entries = <T extends z.ZodType>(schema: T) =>
   z.array(schema).max(250_000);
 const settings = z
@@ -58,6 +74,25 @@ const settings = z
       z.literal(300),
       z.literal(900),
     ]),
+    budgetCycle: z
+      .object({
+        mode: z.enum(["calendar", "salary"]),
+        startDay: z.number().int().min(1).max(31),
+      })
+      .strict()
+      .optional(),
+    financialAutomationEnabled: z.boolean().optional(),
+    reminder: z
+      .object({
+        enabled: z.boolean(),
+        time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+        privacyMode: z.literal("generic"),
+        delivery: z.enum(["calendar", "foreground"]),
+        lastNotifiedDate: date.optional(),
+      })
+      .strict()
+      .optional(),
+    saveReceiptImages: z.boolean().optional(),
   })
   .strict();
 
@@ -73,6 +108,11 @@ export const appDataSchema = z
           description: text,
           ...category,
           ...payment,
+          ...sourceAccount,
+          ...externalMetadata,
+          paymentChannel,
+          receiptId: id.optional(),
+          externalMergedFromManual: z.boolean().optional(),
           memo: text,
           isFixedCost: z.boolean(),
           recurringOccurrenceId: id.optional(),
@@ -88,6 +128,8 @@ export const appDataSchema = z
           source: text,
           memo: text,
           type: z.enum(["salary", "temporary", "other"]),
+          ...sourceAccount,
+          ...externalMetadata,
         })
         .strict(),
     ),
@@ -110,6 +152,7 @@ export const appDataSchema = z
         .object({
           ...stamp,
           creditCardId: id,
+          ...sourceAccount,
           amount: positive,
           date,
           memo: text,
@@ -132,11 +175,23 @@ export const appDataSchema = z
           isEstimated: z.boolean(),
           cashReceived: z.boolean(),
           status: z.enum(["active", "paid"]),
+          reserveForCurrentBudget: z.boolean().optional(),
         })
         .strict(),
     ),
     repayments: entries(
-      z.object({ id, debtId: id, amount: positive, date, memo: text }).strict(),
+      z
+        .object({
+          id,
+          createdAt: date.optional(),
+          updatedAt: date.optional(),
+          debtId: id,
+          amount: positive,
+          date,
+          memo: text,
+          ...sourceAccount,
+        })
+        .strict(),
     ),
     recurringExpenses: entries(
       z
@@ -146,6 +201,7 @@ export const appDataSchema = z
           amount: positive,
           ...category,
           ...payment,
+          ...sourceAccount,
           frequency: z.enum(["monthly", "yearly"]),
           dueDay: z.number().int().min(1).max(31),
           startDate: date,
@@ -183,7 +239,16 @@ export const appDataSchema = z
     ),
     savingsContributions: entries(
       z
-        .object({ id, savingsGoalId: id, amount: positive, date, memo: text })
+        .object({
+          id,
+          createdAt: date.optional(),
+          updatedAt: date.optional(),
+          savingsGoalId: id,
+          amount: positive,
+          date,
+          memo: text,
+          ...sourceAccount,
+        })
         .strict(),
     ),
     budgets: entries(
@@ -248,19 +313,182 @@ export const appDataSchema = z
           merchant: text,
           ...category,
           ...payment,
+          ...sourceAccount,
+          paymentChannel,
         })
         .strict(),
     ),
+    accounts: entries(
+      z
+        .object({
+          ...stamp,
+          name: text,
+          kind: z.enum([
+            "BANK",
+            "CASH",
+            "EWALLET",
+            "CREDIT_CARD",
+            "SAVINGS",
+            "OTHER",
+          ]),
+          institutionName: text,
+          currency: z.literal("JPY"),
+          snapshotBalance: signedMoney.nullable(),
+          balanceAsOf: optionalDate,
+          snapshotRecordedAt: optionalDate,
+          balanceSource: z.enum(["manual", "provider"]),
+          creditCardId: id.optional(),
+          providerId: providerId.optional(),
+          connectionId: id.optional(),
+          externalAccountId: id.optional(),
+          isSpendable: z.boolean(),
+          isActive: z.boolean(),
+          automationLevel: z.enum(["automatic", "semi", "manual"]),
+        })
+        .strict(),
+    ).optional(),
+    transfers: entries(
+      z
+        .object({
+          ...stamp,
+          fromAccountId: id,
+          toAccountId: id,
+          amount: positive,
+          date,
+          memo: text,
+          fromBalanceEffect: balanceEffect,
+          toBalanceEffect: balanceEffect,
+          externalTransactionIds: z.array(id).max(100).optional(),
+          status: z.enum(["confirmed", "reversed"]),
+        })
+        .strict(),
+    ).optional(),
+    financialConnections: entries(
+      z
+        .object({
+          ...stamp,
+          providerId,
+          status: z.enum(["connected", "reauthentication", "disconnected"]),
+          institutionIds: z.array(id).max(500),
+          consentedAt: date,
+        })
+        .strict(),
+    ).optional(),
+    externalTransactions: entries(
+      z
+        .object({
+          ...stamp,
+          providerId,
+          connectionId: id,
+          externalTransactionId: id,
+          externalAccountId: id,
+          accountId: id,
+          date,
+          amount: signedMoney,
+          description: text,
+          currency: z.string().min(1).max(10),
+          pendingStatus: z.enum(["pending", "posted", "unknown"]),
+          externalUpdatedAt: date,
+          kind: z.enum([
+            "unclassified",
+            "expense",
+            "income",
+            "transfer",
+            "refund",
+            "cardPayment",
+            "ignored",
+          ]),
+          linkedRecordId: id.optional(),
+          relatedExpenseId: id.optional(),
+          originalCurrency: z.string().min(1).max(10).optional(),
+          originalAmount: z
+            .number()
+            .finite()
+            .min(-MAX_MONEY)
+            .max(MAX_MONEY)
+            .optional(),
+          finalJPYAmount: money.optional(),
+          balanceEffect,
+        })
+        .strict(),
+    ).optional(),
+    syncStates: entries(
+      z
+        .object({
+          id,
+          lastAttemptAt: date.nullable(),
+          lastSuccessAt: date.nullable(),
+          nextRefreshAllowedAt: date.nullable(),
+          status: z.enum([
+            "idle",
+            "syncing",
+            "offline",
+            "reauthentication",
+            "maintenance",
+            "rateLimited",
+            "error",
+          ]),
+          message: text,
+        })
+        .strict(),
+    ).optional(),
+    receipts: entries(
+      z
+        .object({
+          ...stamp,
+          expenseId: id.optional(),
+          mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
+          imageBase64: z
+            .string()
+            .min(4)
+            .max(15_000_000)
+            .regex(/^[A-Za-z0-9+/]*={0,2}$/)
+            .refine((value) => value.length % 4 === 0),
+        })
+        .strict(),
+    ).optional(),
+    salaryRules: entries(
+      z
+        .object({
+          ...stamp,
+          accountId: id,
+          normalizedDescription: text,
+          enabled: z.boolean(),
+        })
+        .strict(),
+    ).optional(),
+    financialAudits: entries(
+      z
+        .object({
+          ...stamp,
+          action: z.string().min(1).max(100),
+          recordId: id,
+          detail: text,
+        })
+        .strict(),
+    ).optional(),
+    accountAdjustments: entries(
+      z
+        .object({
+          ...stamp,
+          accountId: id,
+          previousBalance: signedMoney,
+          newBalance: signedMoney,
+          date,
+          memo: text,
+        })
+        .strict(),
+    ).optional(),
   })
   .strict();
 
 const backupSchema = z
   .object({
-    schemaVersion: z.literal(SCHEMA_VERSION),
+    schemaVersion: z.union([z.literal(1), z.literal(2)]),
     metadata: z
       .object({
         appVersion: z.string().min(1).max(100),
-        schemaVersion: z.literal(SCHEMA_VERSION),
+        schemaVersion: z.union([z.literal(1), z.literal(2)]),
         exportedAt: date,
       })
       .strict(),
@@ -288,6 +516,9 @@ export function validateData(value: unknown): AppData {
     ...data.savingsContributions,
     ...data.balanceAdjustments,
     ...data.dailyCheckIns,
+    ...(data.transfers ?? []),
+    ...(data.externalTransactions ?? []),
+    ...(data.accountAdjustments ?? []),
   ])
     row.date = civilDate(row.date);
   for (const row of data.debts) {
@@ -331,6 +562,104 @@ export function validateData(value: unknown): AppData {
     data.recurringOccurrences.map((row) => [row.id, row]),
   );
   const expenses = new Map(data.expenses.map((row) => [row.id, row]));
+  const accounts = new Map((data.accounts ?? []).map((row) => [row.id, row]));
+  const connections = new Map(
+    (data.financialConnections ?? []).map((row) => [row.id, row]),
+  );
+  const transfers = new Map((data.transfers ?? []).map((row) => [row.id, row]));
+  const incomes = new Map(data.incomes.map((row) => [row.id, row]));
+  const receipts = new Map((data.receipts ?? []).map((row) => [row.id, row]));
+  unique(
+    (data.externalTransactions ?? []).map((row) =>
+      JSON.stringify([
+        row.providerId,
+        row.connectionId,
+        row.externalTransactionId,
+      ]),
+    ),
+  );
+  for (const account of accounts.values()) {
+    if (
+      account.snapshotBalance !== null &&
+      (!account.balanceAsOf || !account.snapshotRecordedAt)
+    )
+      fail();
+    if (
+      account.creditCardId &&
+      (!cards.has(account.creditCardId) || account.kind !== "CREDIT_CARD")
+    )
+      fail();
+    if (account.kind === "CREDIT_CARD" && account.isSpendable) fail();
+    if (account.connectionId && !connections.has(account.connectionId)) fail();
+    if (
+      account.balanceSource === "provider" &&
+      (!account.connectionId ||
+        !account.externalAccountId ||
+        !account.providerId)
+    )
+      fail();
+  }
+  for (const row of [
+    ...data.expenses,
+    ...data.incomes,
+    ...data.cardPayments,
+    ...data.repayments,
+    ...data.savingsContributions,
+    ...data.recurringExpenses,
+    ...data.favorites,
+  ]) {
+    if (row.sourceAccountId && !accounts.has(row.sourceAccountId)) fail();
+    if (
+      "connectionId" in row &&
+      row.connectionId &&
+      !connections.has(row.connectionId)
+    )
+      fail();
+  }
+  for (const row of data.transfers ?? [])
+    if (
+      !accounts.has(row.fromAccountId) ||
+      !accounts.has(row.toAccountId) ||
+      row.fromAccountId === row.toAccountId
+    )
+      fail();
+  for (const row of data.externalTransactions ?? []) {
+    const connection = connections.get(row.connectionId);
+    if (
+      !accounts.has(row.accountId) ||
+      !connection ||
+      connection.providerId !== row.providerId
+    )
+      fail();
+    if (row.linkedRecordId) {
+      if (row.kind === "expense" && !expenses.has(row.linkedRecordId)) fail();
+      if (row.kind === "income" && !incomes.has(row.linkedRecordId)) fail();
+      if (row.kind === "transfer" && !transfers.has(row.linkedRecordId)) fail();
+      if (
+        row.kind === "cardPayment" &&
+        !data.cardPayments.some(
+          (payment) => payment.id === row.linkedRecordId,
+        ) &&
+        !transfers.has(row.linkedRecordId)
+      )
+        fail();
+    }
+    if (row.relatedExpenseId && !expenses.has(row.relatedExpenseId)) fail();
+  }
+  for (const row of data.receipts ?? [])
+    if (row.expenseId && !expenses.has(row.expenseId)) fail();
+  for (const row of data.expenses)
+    if (
+      row.receiptId &&
+      (!receipts.has(row.receiptId) ||
+        receipts.get(row.receiptId)?.expenseId !== row.id)
+    )
+      fail();
+  for (const row of [
+    ...(data.salaryRules ?? []),
+    ...(data.accountAdjustments ?? []),
+  ])
+    if (!accounts.has(row.accountId)) fail();
   for (const row of [
     ...data.expenses,
     ...data.recurringExpenses,
@@ -405,13 +734,18 @@ export function validateData(value: unknown): AppData {
     "previousBalance",
     "newBalance",
     "difference",
+    "snapshotBalance",
+    "originalAmount",
+    "finalJPYAmount",
+    "feeAmount",
   ]);
   for (const rows of Object.values(data))
     if (Array.isArray(rows))
       for (const row of rows) {
         for (const [key, value] of Object.entries(row))
           if (moneyKeys.has(key) && typeof value === "number") {
-            aggregate += Math.abs(value);
+            // Original foreign-currency amounts can have fractional units.
+            aggregate += Math.ceil(Math.abs(value));
             if (!Number.isSafeInteger(aggregate)) fail();
           }
       }
@@ -432,5 +766,7 @@ export function makeBackupObject(data: AppData) {
 
 export function validateBackup(value: unknown): AppData {
   const envelope = backupSchema.parse(value);
+  if (envelope.schemaVersion !== envelope.metadata.schemaVersion)
+    throw new Error("Backup schema version mismatch");
   return validateData(envelope.data);
 }

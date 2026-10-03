@@ -1,3 +1,4 @@
+import { installVaultSupport } from './qa-vault-support.mjs';
 import { chromium } from "playwright";
 import fs from "node:fs/promises";
 await fs.mkdir("test-results", { recursive: true });
@@ -18,6 +19,7 @@ const context = await browser.newContext({
   hasTouch: true,
 });
 const page = await context.newPage();
+installVaultSupport(page);
 const errors = [],
   externalRequests = [];
 page.on("pageerror", (e) => errors.push(e.message));

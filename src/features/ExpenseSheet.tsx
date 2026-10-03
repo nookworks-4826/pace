@@ -16,8 +16,12 @@ import {
 } from "../domain/categorization";
 import { paymentLabels } from "../types";
 import type { Expense, Favorite, PaymentMethod } from "../types";
+import type { PaymentChannel } from "../types";
+import { ReceiptCapture } from "./ReceiptCapture";
 
 interface Draft {
+  sourceAccountId: string;
+  paymentChannel: PaymentChannel;
   amount: string;
   merchant: string;
   date: string;
@@ -35,17 +39,37 @@ export function ExpenseSheet({
   onClose: () => void;
 }) {
   const { data, today, toast } = usePace();
+  const lastExpense = [...data.expenses].sort((a, b) =>
+    b.createdAt.localeCompare(a.createdAt),
+  )[0];
+  const initialAccount =
+    (data.accounts ?? []).find(
+      (a) => a.isActive && a.id === lastExpense?.sourceAccountId,
+    ) ?? (data.accounts ?? []).find((a) => a.isActive && a.kind === "CASH");
   const blank: Draft = {
+    sourceAccountId: initialAccount?.id ?? "",
+    paymentChannel: "direct",
     amount: "",
     merchant: "",
     date: today,
     categoryId: "uncategorized",
     subcategoryId: "",
     paymentMethod:
-      [...data.expenses].sort((a, b) =>
-        b.createdAt.localeCompare(a.createdAt),
-      )[0]?.paymentMethod ?? "cash",
-    creditCardId: data.cards.find((c) => c.isActive)?.id ?? "",
+      data.settings.financialAutomationEnabled && initialAccount
+        ? initialAccount.kind === "CREDIT_CARD"
+          ? "creditCard"
+          : initialAccount.kind === "CASH"
+            ? "cash"
+            : initialAccount.kind === "BANK"
+              ? "bank"
+              : "other"
+        : ([...data.expenses].sort((a, b) =>
+            b.createdAt.localeCompare(a.createdAt),
+          )[0]?.paymentMethod ?? "cash"),
+    creditCardId:
+      initialAccount?.creditCardId ??
+      data.cards.find((c) => c.isActive)?.id ??
+      "",
     memo: "",
   };
   const [draft, setDraft] = useState<Draft>(() =>
@@ -54,6 +78,8 @@ export function ExpenseSheet({
           ...expense,
           amount: String(expense.amount),
           creditCardId: expense.creditCardId ?? "",
+          sourceAccountId: expense.sourceAccountId ?? "",
+          paymentChannel: expense.paymentChannel ?? "direct",
         }
       : blank,
   );
@@ -95,6 +121,9 @@ export function ExpenseSheet({
   const [quick, setQuick] = useState("");
   const [manual, setManual] = useState(Boolean(expense));
   const [favorite, setFavorite] = useState(false);
+  const [receiptImage, setReceiptImage] = useState<File | undefined>();
+  const [receiptBusy, setReceiptBusy] = useState(false);
+  const receiptBusyRef = useRef(false);
   const savedRef = useRef(false);
   useEffect(() => {
     if (draftReady && !expense && !savedRef.current)
@@ -159,9 +188,13 @@ export function ExpenseSheet({
       subcategoryId: f.subcategoryId,
       paymentMethod: f.paymentMethod,
       creditCardId: f.creditCardId ?? old.creditCardId,
+      sourceAccountId: f.sourceAccountId ?? old.sourceAccountId,
+      paymentChannel: f.paymentChannel ?? "direct",
     }));
   }
   async function save() {
+    if (receiptBusyRef.current)
+      throw new Error("レシートの処理が終わるまでお待ちください。");
     const amount = Number(draft.amount);
     if (!Number.isSafeInteger(amount) || amount < 1 || amount > 999_999_999_999)
       throw new Error("1円以上の金額を入力してください。");
@@ -169,7 +202,28 @@ export function ExpenseSheet({
       throw new Error(
         "未来の日付は記録できません。予定は固定費から登録できます。",
       );
-    if (draft.paymentMethod === "creditCard" && !draft.creditCardId)
+    const source = (data.accounts ?? []).find(
+      (a) =>
+        a.id === draft.sourceAccountId &&
+        (a.isActive || a.id === expense?.sourceAccountId),
+    );
+    if (data.settings.financialAutomationEnabled && !source)
+      throw new Error("支払元を選んでください。");
+    if (source?.kind === "CREDIT_CARD" && !source.creditCardId)
+      throw new Error("口座の設定で対応するカードを選んでください。");
+    const paymentMethod = source
+      ? source.kind === "CREDIT_CARD"
+        ? "creditCard"
+        : source.kind === "CASH"
+          ? "cash"
+          : source.kind === "BANK"
+            ? "bank"
+            : "other"
+      : draft.paymentMethod;
+    if (
+      paymentMethod === "creditCard" &&
+      !(source?.creditCardId ?? draft.creditCardId)
+    )
       throw new Error(
         "カードを選んでください。設定の「カード」から追加できます。",
       );
@@ -197,14 +251,35 @@ export function ExpenseSheet({
       description: expense?.description ?? "",
       categoryId: draft.categoryId,
       subcategoryId: draft.subcategoryId,
-      paymentMethod: draft.paymentMethod,
+      paymentMethod,
       creditCardId:
-        draft.paymentMethod === "creditCard" ? draft.creditCardId : undefined,
+        paymentMethod === "creditCard"
+          ? (source?.creditCardId ?? draft.creditCardId)
+          : undefined,
       memo: draft.memo,
       isFixedCost: expense?.isFixedCost ?? false,
       recurringOccurrenceId: expense?.recurringOccurrenceId,
+      sourceAccountId: source?.id ?? expense?.sourceAccountId,
+      paymentChannel: draft.paymentChannel,
+      balanceEffect: expense?.externalTransactionId ? "snapshot" : "ledger",
+      pendingStatus: expense?.externalTransactionId
+        ? expense.pendingStatus
+        : paymentMethod === "creditCard"
+          ? "pending"
+          : undefined,
       updatedAt: new Date().toISOString(),
     };
+    const receiptId = receiptImage ? crypto.randomUUID() : undefined;
+    if (receiptId) row.receiptId = receiptId;
+    const imageBase64 = receiptImage
+      ? await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result).split(",")[1]);
+          reader.onerror = () =>
+            reject(new Error("画像を保存できませんでした。"));
+          reader.readAsDataURL(receiptImage);
+        })
+      : undefined;
     await db.transaction(
       "rw",
       [
@@ -216,8 +291,19 @@ export function ExpenseSheet({
         db.recurringExpenses,
         db.favorites,
         db.drafts,
+        db.receipts,
+        db.externalTransactions,
       ],
       async () => {
+        if (receiptImage && receiptId && imageBase64) {
+          await db.receipts.add({
+            ...stamp(),
+            id: receiptId,
+            expenseId: row.id,
+            mimeType: receiptImage.type,
+            imageBase64,
+          });
+        }
         await saveExpense(row);
         if (favorite)
           await db.favorites.put({
@@ -229,6 +315,8 @@ export function ExpenseSheet({
             subcategoryId: row.subcategoryId,
             paymentMethod: row.paymentMethod,
             creditCardId: row.creditCardId,
+            sourceAccountId: row.sourceAccountId,
+            paymentChannel: row.paymentChannel,
           });
         if (!expense) await db.drafts.delete("expense");
       },
@@ -247,7 +335,72 @@ export function ExpenseSheet({
   }
   return (
     <Sheet title={expense ? "支出を編集" : "支出を記録"} onClose={onClose}>
-      <AsyncForm onSubmit={save} label={expense ? "変更を保存" : "記録する"}>
+      <AsyncForm
+        onSubmit={save}
+        disabled={receiptBusy}
+        label={expense ? "変更を保存" : "記録する"}
+      >
+        {!expense && (
+          <ReceiptCapture
+            onBusyChange={(busy) => {
+              receiptBusyRef.current = busy;
+              setReceiptBusy(busy);
+            }}
+            onApply={(candidate) => {
+              const possible = (data.accounts ?? []).filter(
+                (a) =>
+                  a.isActive &&
+                  (candidate.paymentMethod === "cash"
+                    ? a.kind === "CASH"
+                    : candidate.paymentMethod === "creditCard"
+                      ? a.kind === "CREDIT_CARD"
+                      : candidate.paymentMethod === "other"
+                        ? a.kind === "EWALLET"
+                        : a.kind === "BANK"),
+              );
+              setManual(false);
+              interacted.current = true;
+              setDraft((old) => ({
+                ...old,
+                amount: candidate.amount
+                  ? String(candidate.amount)
+                  : old.amount,
+                merchant: candidate.merchant || old.merchant,
+                date: candidate.date ?? old.date,
+                paymentMethod: candidate.paymentMethod ?? old.paymentMethod,
+                sourceAccountId: candidate.paymentMethod
+                  ? possible.length === 1
+                    ? possible[0].id
+                    : ""
+                  : old.sourceAccountId,
+                creditCardId:
+                  possible.length === 1
+                    ? (possible[0].creditCardId ?? old.creditCardId)
+                    : old.creditCardId,
+                memo:
+                  [
+                    candidate.time ? `時刻 ${candidate.time}` : "",
+                    candidate.tax ? `税額 ${candidate.tax}円` : "",
+                    ...(candidate.products ?? []),
+                  ]
+                    .filter(Boolean)
+                    .join("\n") || old.memo,
+              }));
+              setReceiptImage(candidate.imageFile);
+            }}
+          />
+        )}
+        {expense?.receiptId &&
+          data.receipts?.find((r) => r.id === expense.receiptId) && (
+            <details>
+              <summary>保存したレシート</summary>
+              <img
+                className="receipt-preview"
+                alt="保存したレシート"
+                src={`data:${data.receipts.find((r) => r.id === expense.receiptId)!.mimeType};base64,${data.receipts.find((r) => r.id === expense.receiptId)!.imageBase64}`}
+              />
+            </details>
+          )}
         <div className="expense-amount">
           <label htmlFor="expense-amount">いくら使いましたか？</label>
           <div>
@@ -355,6 +508,7 @@ export function ExpenseSheet({
                     merchant: e.merchant,
                     paymentMethod: e.paymentMethod,
                     creditCardId: e.creditCardId ?? old.creditCardId,
+                    sourceAccountId: e.sourceAccountId ?? old.sourceAccountId,
                   }));
                 }}
               >
@@ -363,30 +517,71 @@ export function ExpenseSheet({
             ))}
           </div>
         )}
-        <fieldset className="payment-picker">
-          <legend>支払方法</legend>
-          {(Object.keys(paymentLabels) as PaymentMethod[]).map((p) => (
-            <button
-              type="button"
-              key={p}
-              className={draft.paymentMethod === p ? "selected" : ""}
-              aria-pressed={draft.paymentMethod === p}
-              onClick={() => update("paymentMethod", p)}
+        {data.settings.financialAutomationEnabled && (
+          <Field label="支払元">
+            <select
+              required
+              value={draft.sourceAccountId}
+              onChange={(e) => {
+                const a = data.accounts?.find((a) => a.id === e.target.value);
+                setDraft((old) => ({
+                  ...old,
+                  sourceAccountId: e.target.value,
+                  paymentMethod:
+                    a?.kind === "CREDIT_CARD"
+                      ? "creditCard"
+                      : a?.kind === "CASH"
+                        ? "cash"
+                        : a?.kind === "BANK"
+                          ? "bank"
+                          : "other",
+                  creditCardId: a?.creditCardId ?? old.creditCardId,
+                }));
+              }}
             >
-              {p === "creditCard" ? (
-                <CardIcon size={19} />
-              ) : (
-                <Wallet size={19} />
-              )}
-              <span>{paymentLabels[p]}</span>
-            </button>
-          ))}
-        </fieldset>
+              <option value="">選択してください</option>
+              {data.accounts
+                ?.filter(
+                  (a) =>
+                    (a.isActive && a.kind !== "SAVINGS") ||
+                    a.id === expense?.sourceAccountId,
+                )
+                .map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                    {!a.isActive ? "（集計外）" : ""}
+                  </option>
+                ))}
+            </select>
+          </Field>
+        )}
+        {!data.settings.financialAutomationEnabled && (
+          <fieldset className="payment-picker">
+            <legend>支払方法</legend>
+            {(Object.keys(paymentLabels) as PaymentMethod[]).map((p) => (
+              <button
+                type="button"
+                key={p}
+                className={draft.paymentMethod === p ? "selected" : ""}
+                aria-pressed={draft.paymentMethod === p}
+                onClick={() => update("paymentMethod", p)}
+              >
+                {p === "creditCard" ? (
+                  <CardIcon size={19} />
+                ) : (
+                  <Wallet size={19} />
+                )}
+                <span>{paymentLabels[p]}</span>
+              </button>
+            ))}
+          </fieldset>
+        )}
         {draft.paymentMethod === "creditCard" && (
           <Field label="利用カード">
             <select
               required
               value={draft.creditCardId}
+              disabled={!!data.settings.financialAutomationEnabled}
               onChange={(e) => update("creditCardId", e.target.value)}
             >
               <option value="">カードを選択</option>
@@ -402,6 +597,20 @@ export function ExpenseSheet({
             <small>
               使った日に支出へ反映。現金残高は引落まで変わりません。
             </small>
+          </Field>
+        )}
+        {draft.paymentMethod === "creditCard" && (
+          <Field label="使い方">
+            <select
+              value={draft.paymentChannel}
+              onChange={(e) =>
+                update("paymentChannel", e.target.value as PaymentChannel)
+              }
+            >
+              <option value="direct">カードで支払う</option>
+              <option value="applePay">Apple Pay</option>
+              <option value="other">その他</option>
+            </select>
           </Field>
         )}
         {frequentCategories.length > 0 && (

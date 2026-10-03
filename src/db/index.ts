@@ -18,7 +18,21 @@ import type {
   RecurringOccurrence,
   SavingsContribution,
   SavingsGoal,
+  Account,
+  Transfer,
+  FinancialConnection,
+  ExternalTransaction,
+  SyncState,
+  Receipt,
+  SalaryRule,
+  FinancialAudit,
+  AccountAdjustment,
 } from "../types";
+import {
+  installVaultMiddleware,
+  type VaultMetadata,
+  type VaultSession,
+} from "./encryption";
 import {
   assertMoney,
   calculateLiquidBalance,
@@ -26,6 +40,7 @@ import {
 } from "../domain/finance";
 import { dateKey, dateOnDay, monthKey, todayJST } from "../domain/dates";
 import { learnMerchantRule, normalizeMerchant } from "../domain/categorization";
+import { validateData } from "../domain/backup/schema";
 
 export const defaultSettings: AppSettings = {
   id: "main",
@@ -129,6 +144,22 @@ export const defaultCategories: Category[] = categorySeed.map(
 );
 
 export class PaceDatabase extends Dexie {
+  accounts!: Table<Account, string>;
+  transfers!: Table<Transfer, string>;
+  financialConnections!: Table<FinancialConnection, string>;
+  externalTransactions!: Table<ExternalTransaction, string>;
+  syncStates!: Table<SyncState, string>;
+  receipts!: Table<Receipt, string>;
+  salaryRules!: Table<SalaryRule, string>;
+  financialAudits!: Table<FinancialAudit, string>;
+  accountAdjustments!: Table<AccountAdjustment, string>;
+  providerCredentials!: Table<{ id: string; value: string }, string>;
+  vaultMeta!: Table<VaultMetadata, string>;
+  readonly vaultSession: VaultSession = {
+    keys: null,
+    migrating: false,
+    hashes: new Map(),
+  };
   drafts!: Table<{ id: string; value: string }, string>;
   expenses!: Table<Expense, string>;
   incomes!: Table<Income, string>;
@@ -170,6 +201,21 @@ export class PaceDatabase extends Dexie {
       favorites: "id",
     });
     this.version(2).stores({ drafts: "id" });
+    this.version(3).stores({
+      accounts: "id,kind,creditCardId,connectionId",
+      transfers: "id,date,fromAccountId,toAccountId",
+      financialConnections: "id,providerId",
+      externalTransactions:
+        "id,&[providerId+connectionId+externalTransactionId],accountId,date",
+      syncStates: "id",
+      receipts: "id,expenseId",
+      salaryRules: "id,accountId",
+      financialAudits: "id,recordId",
+      accountAdjustments: "id,accountId,date",
+      providerCredentials: "id",
+      vaultMeta: "id",
+    });
+    installVaultMiddleware(this, this.vaultSession);
     this.installValidation();
   }
   private installValidation() {
@@ -235,7 +281,58 @@ export class PaceDatabase extends Dexie {
     this.settings.hook("updating", (changes, _key, value) =>
       validateSettings({ ...value, ...changes }),
     );
+    for (const table of [this.transfers, this.accountAdjustments]) {
+      table.hook("creating", (_key, value) => validateAutomationMoney(value));
+      table.hook("updating", (changes, _key, value) =>
+        validateAutomationMoney({ ...value, ...changes }),
+      );
+    }
+    this.accounts.hook("creating", (_key, value) => validateAccount(value));
+    this.accounts.hook("updating", (changes, _key, value) =>
+      validateAccount({ ...value, ...changes }),
+    );
+    this.externalTransactions.hook("creating", (_key, value) =>
+      validateExternalTransaction(value),
+    );
+    this.externalTransactions.hook("updating", (changes, _key, value) =>
+      validateExternalTransaction({ ...value, ...changes }),
+    );
   }
+}
+function validateAutomationMoney(value: Transfer | AccountAdjustment) {
+  dateKey(value.date);
+  if ("amount" in value) {
+    assertMoney(value.amount);
+    if (value.fromAccountId === value.toAccountId)
+      throw new Error("移動元と移動先は異なる口座を選んでください。");
+  } else
+    for (const amount of [value.previousBalance, value.newBalance]) {
+      if (!Number.isSafeInteger(amount) || Math.abs(amount) > MAX_MONEY)
+        throw new Error("残高を確認してください。");
+    }
+}
+function validateAccount(value: Account) {
+  if (
+    value.snapshotBalance !== null &&
+    (!Number.isSafeInteger(value.snapshotBalance) ||
+      Math.abs(value.snapshotBalance) > MAX_MONEY)
+  )
+    throw new Error("口座残高を確認してください。");
+  if (!value.name.trim() || value.currency !== "JPY")
+    throw new Error("口座名と通貨を確認してください。");
+  if (
+    value.snapshotBalance !== null &&
+    (!value.balanceAsOf || !value.snapshotRecordedAt)
+  )
+    throw new Error("残高を確認した日時を入力してください。");
+  if (value.balanceAsOf) dateKey(value.balanceAsOf);
+}
+function validateExternalTransaction(value: ExternalTransaction) {
+  if (!Number.isSafeInteger(value.amount) || Math.abs(value.amount) > MAX_MONEY)
+    throw new Error("金融明細の金額を確認してください。");
+  dateKey(value.date);
+  if (!value.externalTransactionId || !value.connectionId || !value.accountId)
+    throw new Error("金融明細の関連付けを確認してください。");
 }
 function validateDay(value: number) {
   if (!Number.isInteger(value) || value < 1 || value > 31)
@@ -346,6 +443,15 @@ export async function readAppData(): Promise<AppData> {
       balanceAdjustments,
       dailyCheckIns,
       favorites,
+      accounts,
+      transfers,
+      financialConnections,
+      externalTransactions,
+      syncStates,
+      receipts,
+      salaryRules,
+      financialAudits,
+      accountAdjustments,
     ] = await Promise.all([
       db.expenses.toArray(),
       db.incomes.toArray(),
@@ -364,6 +470,15 @@ export async function readAppData(): Promise<AppData> {
       db.balanceAdjustments.toArray(),
       db.dailyCheckIns.toArray(),
       db.favorites.toArray(),
+      db.accounts.toArray(),
+      db.transfers.toArray(),
+      db.financialConnections.toArray(),
+      db.externalTransactions.toArray(),
+      db.syncStates.toArray(),
+      db.receipts.toArray(),
+      db.salaryRules.toArray(),
+      db.financialAudits.toArray(),
+      db.accountAdjustments.toArray(),
     ]);
     return {
       expenses,
@@ -383,6 +498,15 @@ export async function readAppData(): Promise<AppData> {
       balanceAdjustments,
       dailyCheckIns,
       favorites,
+      accounts,
+      transfers,
+      financialConnections,
+      externalTransactions,
+      syncStates,
+      receipts,
+      salaryRules,
+      financialAudits,
+      accountAdjustments,
     };
   });
 }
@@ -434,6 +558,8 @@ export async function saveExpense(expense: Expense): Promise<void> {
       db.cards,
       db.recurringOccurrences,
       db.recurringExpenses,
+      db.receipts,
+      db.externalTransactions,
     ],
     async () => {
       const category = await db.categories.get(expense.categoryId);
@@ -483,6 +609,32 @@ export async function saveExpense(expense: Expense): Promise<void> {
         });
       }
       await db.expenses.put(expense);
+      if (expense.receiptId) {
+        const receipt = await db.receipts.get(expense.receiptId);
+        if (!receipt)
+          throw new Error("レシートが見つかりません。添付を確認してください。");
+        await db.receipts.put({ ...receipt, expenseId: expense.id });
+      }
+      if (
+        expense.providerId &&
+        expense.connectionId &&
+        expense.externalTransactionId
+      ) {
+        const external = await db.externalTransactions
+          .where("[providerId+connectionId+externalTransactionId]")
+          .equals([
+            expense.providerId,
+            expense.connectionId,
+            expense.externalTransactionId,
+          ])
+          .first();
+        if (external)
+          await db.externalTransactions.put({
+            ...external,
+            kind: "expense",
+            linkedRecordId: expense.id,
+          });
+      }
       const normalized = normalizeMerchant(expense.merchant);
       const rule = learnMerchantRule(
         expense.merchant,
@@ -497,13 +649,37 @@ export async function saveExpense(expense: Expense): Promise<void> {
 export async function deleteExpense(id: string): Promise<Expense | undefined> {
   return db.transaction(
     "rw",
-    [db.expenses, db.recurringOccurrences],
+    [
+      db.expenses,
+      db.recurringOccurrences,
+      db.receipts,
+      db.externalTransactions,
+    ],
     async () => {
       const expense = await db.expenses.get(id);
       if (!expense) return undefined;
       await db.expenses.delete(id);
       if (expense.recurringOccurrenceId)
         await db.recurringOccurrences.delete(expense.recurringOccurrenceId);
+      const receipts = await db.receipts
+        .where("expenseId")
+        .equals(id)
+        .toArray();
+      for (const receipt of receipts)
+        await db.receipts.put({ ...receipt, expenseId: undefined });
+      for (const external of await db.externalTransactions.toArray()) {
+        if (external.kind === "expense" && external.linkedRecordId === id)
+          await db.externalTransactions.put({
+            ...external,
+            kind: "ignored",
+            linkedRecordId: undefined,
+          });
+        else if (external.relatedExpenseId === id)
+          await db.externalTransactions.put({
+            ...external,
+            relatedExpenseId: undefined,
+          });
+      }
       return expense;
     },
   );
@@ -524,37 +700,87 @@ export function findDuplicateExpenses(
   );
 }
 
+async function resetFinancialSession<T>(action: () => Promise<T>): Promise<T> {
+  // Invalidate local in-flight requests before replacing their authorization state.
+  if (typeof window !== "undefined")
+    window.dispatchEvent(new Event("pace:financial-reset"));
+  const keys = [
+    ...new Set([
+      "moneytree:default",
+      ...(await db.providerCredentials.toArray()).map((row) => row.id),
+    ]),
+  ].sort();
+  const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
+  const withLock = (index: number): Promise<T> =>
+    !locks || index === keys.length
+      ? action()
+      : locks.request(`pace:moneytree:state:${keys[index]}`, () =>
+          withLock(index + 1),
+        );
+  // The provider uses these same state locks and rejects responses from a removed
+  // session. Another tab therefore cannot restore a token between clear and write.
+  return withLock(0);
+}
+
 export async function clearAllData(): Promise<void> {
-  await db.transaction("rw", db.tables, async () => {
-    for (const table of db.tables) await table.clear();
-    await db.settings.add({
-      ...structuredClone(defaultSettings),
-      lastSeenMonth: monthKey(todayJST()),
-    });
-    await db.categories.bulkAdd(structuredClone(defaultCategories));
-  });
+  await resetFinancialSession(() =>
+    db.transaction("rw", db.tables, async () => {
+      for (const table of db.tables)
+        if (table.name !== "vaultMeta") await table.clear();
+      await db.settings.add({
+        ...structuredClone(defaultSettings),
+        lastSeenMonth: monthKey(todayJST()),
+      });
+      await db.categories.bulkAdd(structuredClone(defaultCategories));
+    }),
+  );
 }
 export async function restoreAppData(data: AppData): Promise<void> {
   // Importers validate the full versioned envelope first; all table changes commit together.
+  data = validateData(data);
   validateSettings(data.settings);
-  await db.transaction("rw", db.tables, async () => {
-    for (const table of db.tables) await table.clear();
-    await db.expenses.bulkAdd(data.expenses);
-    await db.incomes.bulkAdd(data.incomes);
-    await db.cards.bulkAdd(data.cards);
-    await db.cardPayments.bulkAdd(data.cardPayments);
-    await db.debts.bulkAdd(data.debts);
-    await db.repayments.bulkAdd(data.repayments);
-    await db.recurringExpenses.bulkAdd(data.recurringExpenses);
-    await db.recurringOccurrences.bulkAdd(data.recurringOccurrences);
-    await db.savingsGoals.bulkAdd(data.savingsGoals);
-    await db.savingsContributions.bulkAdd(data.savingsContributions);
-    await db.budgets.bulkAdd(data.budgets);
-    await db.settings.add({ ...data.settings, id: "main" });
-    await db.merchantRules.bulkAdd(data.merchantRules);
-    await db.categories.bulkAdd(data.categories);
-    await db.balanceAdjustments.bulkAdd(data.balanceAdjustments);
-    await db.dailyCheckIns.bulkAdd(data.dailyCheckIns);
-    await db.favorites.bulkAdd(data.favorites);
-  });
+  await resetFinancialSession(() =>
+    db.transaction("rw", db.tables, async () => {
+      for (const table of db.tables)
+        if (table.name !== "vaultMeta") await table.clear();
+      await db.expenses.bulkAdd(data.expenses);
+      await db.incomes.bulkAdd(data.incomes);
+      await db.cards.bulkAdd(data.cards);
+      await db.cardPayments.bulkAdd(data.cardPayments);
+      await db.debts.bulkAdd(data.debts);
+      await db.repayments.bulkAdd(data.repayments);
+      await db.recurringExpenses.bulkAdd(data.recurringExpenses);
+      await db.recurringOccurrences.bulkAdd(data.recurringOccurrences);
+      await db.savingsGoals.bulkAdd(data.savingsGoals);
+      await db.savingsContributions.bulkAdd(data.savingsContributions);
+      await db.budgets.bulkAdd(data.budgets);
+      await db.settings.add({ ...data.settings, id: "main" });
+      await db.merchantRules.bulkAdd(data.merchantRules);
+      await db.categories.bulkAdd(data.categories);
+      await db.balanceAdjustments.bulkAdd(data.balanceAdjustments);
+      await db.dailyCheckIns.bulkAdd(data.dailyCheckIns);
+      await db.favorites.bulkAdd(data.favorites);
+      await db.accounts.bulkAdd(data.accounts ?? []);
+      await db.transfers.bulkAdd(data.transfers ?? []);
+      // A restored backup retains records but never grants provider authorization.
+      await db.financialConnections.bulkAdd(
+        (data.financialConnections ?? []).map((row) => ({
+          ...row,
+          status: "disconnected" as const,
+        })),
+      );
+      await db.externalTransactions.bulkAdd(data.externalTransactions ?? []);
+      await db.syncStates.bulkAdd(
+        (data.syncStates ?? []).map((row) => ({
+          ...row,
+          status: "reauthentication" as const,
+          message: "金融連携をもう一度設定してください。",
+        })),
+      );
+      await db.receipts.bulkAdd(data.receipts ?? []);
+      await db.salaryRules.bulkAdd(data.salaryRules ?? []);
+      await db.financialAudits.bulkAdd(data.financialAudits ?? []);
+      await db.accountAdjustments.bulkAdd(data.accountAdjustments ?? []);
+    }),
+  );
 }

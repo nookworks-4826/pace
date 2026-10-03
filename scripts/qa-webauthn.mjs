@@ -1,3 +1,4 @@
+import { installVaultSupport } from './qa-vault-support.mjs';
 import { chromium, expect } from "@playwright/test";
 import fs from "node:fs/promises";
 import assert from "node:assert/strict";
@@ -133,6 +134,7 @@ try {
     };
   });
   const page = await context.newPage();
+installVaultSupport(page);
   page.setDefaultTimeout(15000);
   observeErrors(page, "android-platform");
   const cdp = await context.newCDPSession(page);
@@ -403,6 +405,7 @@ try {
     );
   });
   const unsupportedPage = await unsupportedContext.newPage();
+installVaultSupport(unsupportedPage);
   unsupportedPage.setDefaultTimeout(15000);
   observeErrors(unsupportedPage, "android-pin-fallback");
   await openLockSettings(unsupportedPage);
