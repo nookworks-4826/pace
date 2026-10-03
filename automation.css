@@ -1,0 +1,259 @@
+.vault-screen {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 30px 20px;
+  background: var(--bg);
+  gap: 12px;
+}
+.vault-screen > h1 {
+  font-size: 36px;
+  margin: 0;
+}
+.vault-panel {
+  width: min(100%, 430px);
+  padding: 28px !important;
+}
+.vault-panel h2 {
+  font-size: 20px;
+  margin: 14px 0 22px;
+}
+.vault-panel > svg {
+  color: var(--accent);
+}
+.money-page > .surface,
+.financial-settings > .surface {
+  padding: 22px;
+  margin-bottom: 18px;
+}
+.money-page h2,
+.financial-settings h2 {
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 12px;
+}
+.money-page p,
+.financial-settings p {
+  line-height: 1.65;
+}
+.financial-settings .button,
+.money-page > .button {
+  margin-bottom: 12px;
+}
+.money-page > .chips {
+  margin: 14px 0 22px;
+}
+.money-total {
+  background: linear-gradient(130deg, #fff6cf, var(--surface)) !important;
+  display: grid;
+  gap: 8px;
+}
+.money-total strong {
+  font-size: 34px;
+  letter-spacing: -1px;
+}
+.money-total small {
+  font-size: 12px;
+  color: var(--muted);
+}
+.account-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 18px 0;
+}
+.account-card {
+  position: relative;
+  text-align: left;
+  padding: 18px !important;
+  display: grid;
+  gap: 8px;
+  overflow: hidden;
+}
+.account-card b {
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.account-card strong {
+  font-size: 23px;
+  letter-spacing: -0.4px;
+  overflow-wrap: anywhere;
+}
+.account-card small {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.account-card > svg:last-child {
+  position: absolute;
+  right: 14px;
+  top: 18px;
+  color: var(--muted);
+}
+.account-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: #ffecac;
+  color: #474137;
+  display: grid;
+  place-items: center;
+}
+.transfer-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+.transfer-row > div {
+  flex: 1;
+  min-width: 0;
+}
+.transfer-row small {
+  display: block;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.transfer-row b {
+  overflow-wrap: anywhere;
+}
+.transfer-row > b {
+  white-space: nowrap;
+  font-size: 14px;
+}
+.inline-alert {
+  background: var(--surface-alt, #fff4d7);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px;
+  line-height: 1.7;
+  margin: 14px 0;
+  color: var(--text);
+}
+.financial-inbox .settings-row {
+  padding: 15px 0;
+  gap: 12px;
+  align-items: flex-start;
+  text-align: left;
+}
+.financial-inbox .settings-row > span {
+  flex: 1;
+  min-width: 0;
+}
+.financial-inbox b {
+  overflow-wrap: anywhere;
+}
+.financial-inbox small {
+  display: block;
+}
+.count-badge {
+  background: #ffdf79;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: #3b3731;
+}
+.privacy-center {
+  background: linear-gradient(145deg, #fff4c9, var(--surface)) !important;
+}
+.capability-list {
+  display: grid;
+  gap: 15px;
+  margin: 20px 0;
+}
+.capability-list > div {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+}
+.capability-list dt {
+  font-size: 14px;
+  font-weight: 650;
+}
+.capability-list dd {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 5px 0 0;
+  line-height: 1.7;
+}
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.financial-settings .microcopy {
+  display: block;
+}
+.receipt-preview {
+  max-height: 260px;
+  width: 100%;
+  object-fit: contain;
+  border-radius: 16px;
+  background: var(--surface-alt);
+}
+.receipt-progress {
+  padding: 18px;
+  text-align: center;
+}
+.receipt-tools {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 10px 0;
+}
+.receipt-tools .button {
+  flex: 1;
+}
+.receipt-camera-label {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: center;
+}
+.receipt-camera-label input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.receipt-text {
+  white-space: pre-wrap;
+  max-height: 180px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.account-picker .chips {
+  margin-bottom: 8px;
+}
+[data-mode="dark"] .money-total,
+[data-mode="dark"] .privacy-center {
+  background: var(--surface) !important;
+}
+@media (max-width: 374px) {
+  .account-card {
+    padding: 13px !important;
+  }
+  .account-card strong {
+    font-size: 21px;
+  }
+  .transfer-row {
+    flex-wrap: wrap;
+  }
+}
+@media (min-width: 768px) {
+  .account-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .receipt-progress * {
+    animation: none !important;
+  }
+}

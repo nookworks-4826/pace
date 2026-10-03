@@ -43,6 +43,13 @@ export default defineConfig({
         ],
       },
       workbox: {
+        importScripts: ['sw-notifications.js'],
+        globIgnores: ['**/ocr/**'],
+        runtimeCaching: [{
+          urlPattern: ({url})=>url.origin===self.location.origin && /\/ocr\/(worker\.min\.js|tesseract-core-(?:relaxedsimd-|simd-)?lstm\.wasm\.js|(?:jpn|eng)\.traineddata\.gz)$/.test(url.pathname),
+          handler:'CacheFirst',
+          options:{cacheName:'pace-ocr-static-v7',expiration:{maxEntries:6},cacheableResponse:{statuses:[200]}},
+        }],
         globPatterns: ["**/*.{js,css,html,png,svg,woff2}"],
         maximumFileSizeToCacheInBytes: 5_000_000,
         cleanupOutdatedCaches: true,
