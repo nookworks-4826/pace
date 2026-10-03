@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
-import { beforeAll, afterAll, it, expect } from "vitest";
-import { db, initializeDb, readAppData } from "../db";
+import { beforeAll, beforeEach, afterAll, it, expect } from "vitest";
+import { db, defaultSettings, defaultCategories, readAppData } from "../db";
 import { initializeVault } from "../domain/vault";
 import {
   syncFinancialConnection,
@@ -13,7 +13,8 @@ import { todayJST } from "../domain/dates";
 import type { FinancialConnection } from "../types";
 const today = todayJST(),
   now = new Date().toISOString();
-const connection: FinancialConnection = {
+let fixtureSequence = 0;
+let connection: FinancialConnection = {
   id: "fictional-connection",
   providerId: "mock",
   status: "connected",
@@ -52,8 +53,23 @@ beforeAll(async () => {
   await db.delete();
   await db.open();
   await initializeVault("fictional sync vault passphrase");
-  await initializeDb();
-  await db.settings.update("main", { financialAutomationEnabled: true });
+}, 15000);
+beforeEach(async () => {
+  // Every case owns its ledger and connection; an in-flight mock from another
+  // case must never be reused through the production single-flight map.
+  await db.transaction("rw", db.tables, async () => {
+    for (const table of db.tables)
+      if (table.name !== "vaultMeta") await table.clear();
+  });
+  await db.settings.put({
+    ...structuredClone(defaultSettings),
+    financialAutomationEnabled: true,
+  });
+  await db.categories.bulkAdd(structuredClone(defaultCategories));
+  connection = {
+    ...connection,
+    id: `fictional-connection-${++fixtureSequence}`,
+  };
   await db.financialConnections.put(connection);
 }, 15000);
 afterAll(async () => {
@@ -82,12 +98,27 @@ it("rejects a pre-reset sync even if a new connection has the same id", async ()
   const captured = syncFinancialConnection(delayed, connection).catch(
     (error) => error,
   );
-  await started;
-  epoch++;
-  await db.syncStates.delete(connection.id);
-  release();
+  try {
+    await Promise.race([
+      started,
+      captured.then((result) => {
+        throw result instanceof Error
+          ? result
+          : new Error("The sync completed before the delayed request started");
+      }),
+    ]);
+    epoch++;
+    // A reset can create a new connection with the same logical ID. The old
+    // response must not update that connection or recreate its removed state.
+    await db.financialConnections.put({ ...connection, updatedAt: now });
+    await db.syncStates.delete(connection.id);
+  } finally {
+    release();
+    await captured;
+  }
   expect(await captured).toBeInstanceOf(Error);
   expect(await db.syncStates.get(connection.id)).toBeUndefined();
+  expect((await readAppData()).externalTransactions).toHaveLength(0);
 });
 it("is idempotent and does not subtract imported purchases from a provider snapshot twice", async () => {
   await syncFinancialConnection(provider, connection);
@@ -104,6 +135,7 @@ it("is idempotent and does not subtract imported purchases from a provider snaps
   expect(computeFinance(data).liquidBalance).toBe(9000);
 });
 it("preserves records when a fetch fails", async () => {
+  await syncFinancialConnection(provider, connection);
   const before = await readAppData();
   await db.syncStates.update(connection.id, {
     lastAttemptAt: "2000-01-01T00:00:00Z",
@@ -121,6 +153,7 @@ it("preserves records when a fetch fails", async () => {
   expect(after.syncStates?.[0].status).toBe("error");
 });
 it("does not invent a fresh balance timestamp when the provider omits it", async () => {
+  await syncFinancialConnection(provider, connection);
   const before = (await readAppData()).accounts?.[0];
   await db.syncStates.update(connection.id, {
     lastAttemptAt: "2000-01-01T00:00:00Z",
@@ -147,6 +180,7 @@ it("does not invent a fresh balance timestamp when the provider omits it", async
   expect(after?.snapshotRecordedAt).toBe(before?.snapshotRecordedAt);
 });
 it("keeps a manually merged purchase when imported history is removed", async () => {
+  await syncFinancialConnection(provider, connection);
   const expense = (await readAppData()).expenses[0];
   await db.expenses.update(expense.id, { externalMergedFromManual: true });
   await disconnectFinancialConnection(provider, connection.id, true);
