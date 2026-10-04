@@ -6,7 +6,26 @@ import { chromium, expect } from "@playwright/test";
 import { startQaServer } from "./qa-vite-support.mjs";
 import { ensureVaultGate } from "./qa-vault-support.mjs";
 
-const qa = await startQaServer("settings");
+// Former connection variables must never re-enable bank linking in this release.
+const fictionalBankEnvironment = {
+  VITE_MONEYTREE_CLIENT_ID: "fictional-disabled-public-client",
+  VITE_MONEYTREE_REDIRECT_URI: "https://pace.example.test/pace/",
+  VITE_MONEYTREE_ENVIRONMENT: "production",
+  VITE_MONEYTREE_BROWSER_ACCESS_CONFIRMED: "true",
+};
+const previousBankEnvironment = Object.fromEntries(
+  Object.keys(fictionalBankEnvironment).map((key) => [key, process.env[key]]),
+);
+let qa;
+try {
+  Object.assign(process.env, fictionalBankEnvironment);
+  qa = await startQaServer("settings");
+} finally {
+  for (const [key, value] of Object.entries(previousBankEnvironment)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+}
 const resultDir = path.join(qa.root, "test-results");
 const screenshotsDir = path.join(resultDir, "screenshots");
 const browser = await chromium.launch({
@@ -28,20 +47,30 @@ page.setDefaultNavigationTimeout(60_000);
 const checks = [],
   errors = [],
   foreignRequests = [],
+  bankRequests = [],
   overflows = [];
 let phase = "initialize";
 page.on("pageerror", (error) => errors.push(error.message));
 context.on("request", (request) => {
   const url = new URL(request.url());
+  if (/\.(?:getmoneytree\.com|moneytree\.jp)$/.test(url.hostname))
+    bankRequests.push(`${url.origin}${url.pathname}`);
   if (
     ["http:", "https:"].includes(url.protocol) &&
     url.origin !== new URL(qa.baseURL).origin
   )
     foreignRequests.push(url.origin);
 });
+// A regression may attempt a provider request; observe and block it locally.
+await context.route(/^https?:\/\//, async (route) => {
+  const url = new URL(route.request().url());
+  if (url.origin !== new URL(qa.baseURL).origin)
+    await route.abort("blockedbyclient");
+  else await route.continue();
+});
 const headings = {
   "/settings": "設定",
-  "/financial": "銀行・カードの連携",
+  "/financial": "口座・カードの管理",
   "/notifications": "通知とリマインダー",
   "/salary": "給料日と予算の期間",
   "/privacy": "プライバシー",
@@ -145,7 +174,7 @@ try {
     ).toBeVisible();
   }
   checks.push(
-    "Separate settings links reach bank/card connection, notifications, salary period and privacy",
+    "Separate settings links reach manual account/card management, notifications, salary period and privacy",
   );
 
   phase = "salary period persistence";
@@ -168,23 +197,26 @@ try {
     "Budget period and expected payday remain independently editable and saved",
   );
 
-  phase = "unconfigured bank connection fallback";
+  phase = "manual account and card management";
   console.log(`Settings UI QA: ${phase}`);
   await route("/financial");
   await expect(
     page.getByRole("heading", {
-      name: "自動連携はまだ利用できません",
+      name: "口座・カードの管理",
       exact: true,
     }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: /Moneytree|連携を許可/ }),
+    page.getByRole("button", {
+      name: /Moneytree|連携を許可|再認証|残高・明細を更新|更新を依頼/,
+    }),
   ).toHaveCount(0);
   await expect(page.getByRole("checkbox", { name: /Moneytree/ })).toHaveCount(
     0,
   );
   const addAccount = page.getByRole("link", {
-    name: /銀行・電子マネーの残高を登録/,
+    name: "口座・残高を登録する",
+    exact: true,
   });
   const csv = page.getByRole("link", { name: /カード明細（CSV）を取り込む/ });
   await expect(addAccount).toBeVisible();
@@ -218,7 +250,7 @@ try {
   });
   assert.equal((await data()).settings.salarySchedule.payday, 27);
   checks.push(
-    "Unavailable automatic linking gives an immediate usable manual account form without changing the user's budget period",
+    "Manual account management opens a usable balance form without bank authorization or changes to the user's budget period",
   );
 
   phase = "card registration resumes CSV import";
@@ -421,24 +453,82 @@ try {
     "Separated settings, account editor and CSV importer fit 375/390px in both light and dark modes",
   );
 
-  phase = "first OAuth callback failure and URL cleanup";
+  phase = "ignored old authorization and stale bank connection";
   console.log(`Settings UI QA: ${phase}`);
+  const legacyBankData = await page.evaluate(async () => {
+    const { db, updateSettings } = await import("/src/db/index.ts");
+    // Existing users may have kept the old automation flag on; even that must
+    // never enable the removed bank integration or change saved data.
+    await updateSettings({ financialAutomationEnabled: true });
+    const stale = new Date(Date.now() - 2 * 60 * 60_000).toISOString();
+    const id = "moneytree:default";
+    await db.financialConnections.put({
+      id,
+      createdAt: stale,
+      updatedAt: stale,
+      providerId: "moneytree",
+      status: "connected",
+      institutionIds: [],
+      consentedAt: stale,
+    });
+    await db.providerCredentials.put({
+      id,
+      value: JSON.stringify({
+        sessionNonce: "fictional-preserved-disabled-session",
+        accessToken: "fictional-never-send-access-token",
+        refreshToken: "fictional-never-send-refresh-token",
+        expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+        scope: [
+          "guest_read",
+          "accounts_read",
+          "transactions_read",
+          "request_refresh",
+        ],
+        resourceServer: "jp-api",
+      }),
+    });
+    await db.syncStates.put({
+      id,
+      lastAttemptAt: stale,
+      lastSuccessAt: stale,
+      nextRefreshAllowedAt: null,
+      status: "idle",
+      message: "架空の過去の取得情報",
+    });
+    return {
+      connections: await db.financialConnections.toArray(),
+      credentials: await db.providerCredentials.toArray(),
+      syncStates: await db.syncStates.toArray(),
+    };
+  });
+  const dataBeforeCallback = await data();
   await page.goto(
-    `${qa.baseURL}?code=fictional-invalid-code&state=fictional-invalid-state#/`,
+    `${qa.baseURL}?code=fictional-invalid-code&state=fictional-invalid-state#/financial`,
   );
   assert.equal(new URL(page.url()).searchParams.has("code"), false);
   assert.equal(new URL(page.url()).searchParams.has("state"), false);
   await ensureVaultGate(page);
   await expect(
-    page.getByRole("heading", { name: "銀行・カードの連携", exact: true }),
+    page.getByRole("heading", { name: "口座・カードの管理", exact: true }),
   ).toBeVisible();
-  await expect(page.locator(".connection-overview [role=alert]")).toBeVisible();
+  await expect(page.locator(".financial-settings [role=alert]")).toHaveCount(0);
+  // An obsolete automatic-sync effect would start a request for this stale fixture.
+  await page.waitForTimeout(1000);
   const afterCallback = await data();
-  assert.equal(afterCallback.financialConnections.length, 0);
+  const preservedLegacyBankData = await page.evaluate(async () => {
+    const { db } = await import("/src/db/index.ts");
+    return {
+      connections: await db.financialConnections.toArray(),
+      credentials: await db.providerCredentials.toArray(),
+      syncStates: await db.syncStates.toArray(),
+    };
+  });
+  assert.deepEqual(preservedLegacyBankData, legacyBankData);
+  assert.deepEqual(afterCallback, dataBeforeCallback);
+  assert.equal(afterCallback.financialConnections.length, 1);
   assert.equal(
-    afterCallback.syncStates.find((state) => state.id === "moneytree:default")
-      ?.status,
-    "error",
+    afterCallback.syncStates.some((state) => state.status === "error"),
+    false,
   );
   assert.equal(
     afterCallback.expenses.filter(
@@ -447,10 +537,11 @@ try {
     1,
   );
   checks.push(
-    "OAuth parameters are removed before unlock and a first connection failure is visible without losing existing records",
+    "Old OAuth parameters are discarded before unlock; formal-looking configuration and preserved stale credentials cannot start bank requests or create errors",
   );
 
   assert.deepEqual(errors, []);
+  assert.deepEqual(bankRequests, []);
   assert.deepEqual(foreignRequests, []);
   await writeFile(
     path.join(resultDir, "settings-results.json"),
@@ -461,8 +552,11 @@ try {
         errors,
         overflows,
         foreignRequests,
+        bankRequests,
         fictionalProfileOnly: true,
-        moneytreeConfigured: false,
+        automaticBankIntegration: false,
+        ignoredConfiguredBankEnvironment: true,
+        legacyFinancialDataPreserved: true,
         screenshots: "screenshots/settings-*",
       },
       null,
@@ -475,6 +569,7 @@ try {
       pageErrors: 0,
       overflows: 0,
       externalRequests: 0,
+      bankRequests: 0,
     }),
   );
 } catch (error) {
@@ -489,6 +584,7 @@ try {
         errors,
         overflows,
         foreignRequests,
+        bankRequests,
       },
       null,
       2,
