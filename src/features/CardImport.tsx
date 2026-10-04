@@ -17,13 +17,19 @@ interface CardImportProps {
   data: AppData;
   onClose: () => void;
   onImported: () => void;
+  onAddCard?: () => void;
 }
 const yen = (amount: number) =>
   new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY" }).format(
     amount,
   );
 
-export function CardImport({ data, onClose, onImported }: CardImportProps) {
+export function CardImport({
+  data,
+  onClose,
+  onImported,
+  onAddCard,
+}: CardImportProps) {
   const [bytes, setBytes] = useState<ArrayBuffer | null>(null);
   const [encoding, setEncoding] = useState<"utf-8" | "shift_jis">("utf-8");
   const [rows, setRows] = useState<string[][]>([]);
@@ -235,7 +241,22 @@ export function CardImport({ data, onClose, onImported }: CardImportProps) {
         <p className="muted">
           購入した日の支出として記録し、カード未払いへ反映します。ファイルはこの端末だけで読み込みます。
         </p>
-        {!previewing ? (
+        {!data.cards.some((card) => card.isActive) ? (
+          <div className="card-import-start">
+            <h2>取り込むカードを登録</h2>
+            <p className="hint">
+              カード名を登録すると、この画面に戻って明細を選べます。
+            </p>
+            {onAddCard && (
+              <button
+                className="button button-primary full"
+                onClick={onAddCard}
+              >
+                カードを追加して続ける
+              </button>
+            )}
+          </div>
+        ) : !previewing ? (
           <>
             <label className="card-import-file">
               <FileSpreadsheet size={22} /> 明細のCSVファイル

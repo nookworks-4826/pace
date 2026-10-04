@@ -1,561 +1,376 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { saveAs } from "file-saver";
 import {
   ArrowLeft,
-  ShieldCheck,
-  Landmark,
-  RefreshCw,
-  Bell,
-  LockKeyhole,
+  ChevronRight,
+  CreditCard,
   ExternalLink,
+  FileSpreadsheet,
+  Landmark,
+  LoaderCircle,
+  RefreshCw,
+  ShieldCheck,
+  Wallet,
 } from "lucide-react";
 import { usePace } from "../app/context";
-import {
-  AsyncForm,
-  Field,
-  Sheet,
-  money,
-  textValue,
-  yen,
-  stamp,
-} from "../components/UI";
-import { db, updateSettings } from "../db";
+import { AsyncForm, Sheet, yen } from "../components/UI";
 import { moneytree } from "../hooks/useFinancialConnections";
-import {
-  enableAccountManagement,
-  fixedCostCandidates,
-} from "../domain/financialActions";
+import { enableAccountManagement } from "../domain/financialActions";
 import {
   disconnectFinancialConnection,
   syncFinancialConnection,
 } from "../domain/financialSync";
-import { lockVault } from "../domain/vault";
-import {
-  buildDailyReminder,
-  enableForegroundNotifications,
-} from "../domain/reminders";
-import type { RecurringExpense } from "../types";
+import { FinancialProviderError } from "../providers/types";
+
+function connectionError(error: unknown) {
+  if (error instanceof FinancialProviderError) {
+    if (error.code === "configurationRequired")
+      return "自動連携はまだ利用できません。残高の登録やカード明細の取り込みを使えます。";
+    if (error.code === "networkOrCors")
+      return "連携先に接続できませんでした。インターネットにつながっているか確認し、もう一度お試しください。";
+    if (error.code === "unsupported")
+      return "このブラウザーでは自動連携を利用できません。残高の登録やカード明細の取り込みを使えます。";
+    return error.message;
+  }
+  return error instanceof Error
+    ? error.message
+    : "連携できませんでした。保存済みの記録は残っています。";
+}
+
+function acquiredAt(value: string | null | undefined) {
+  if (!value || !Number.isFinite(Date.parse(value)))
+    return "まだ取得していません";
+  return new Intl.DateTimeFormat("ja-JP", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
 
 export function FinancialSettings() {
-  const { data, today, run, toast } = usePace();
-  const [consent, setConsent] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const { data, toast } = usePace();
+  const configured = moneytree.isConfigured();
+  const [operation, setOperation] = useState<"connect" | "refresh" | null>(
+    null,
+  );
+  const [error, setError] = useState("");
   const [disconnect, setDisconnect] = useState(false);
-  const [candidate, setCandidate] = useState<
-    (typeof fixedCostCandidates)[number] | null
-  >(null);
-  const [recurringDifference, setRecurringDifference] = useState<{
-    recurring: RecurringExpense;
-    actual: number;
-    expenseId: string;
-  } | null>(null);
+  const [clock, setClock] = useState(Date.now);
+  const operationGuard = useRef(false);
   const connection = data.financialConnections?.find(
     (c) => c.providerId === "moneytree" && c.status !== "disconnected",
   );
   const sync = data.syncStates?.find(
-    (s) => s.id === connection?.id || s.id === "moneytree:default",
+    (s) => s.id === (connection?.id ?? "moneytree:default"),
   );
-  const reminder = data.settings.reminder ?? {
-    enabled: false,
-    time: "08:00",
-    privacyMode: "generic" as const,
-    delivery: "calendar" as const,
-  };
-  const differences = data.expenses
-    .filter(
-      (e) =>
-        e.externalTransactionId &&
-        !e.isFixedCost &&
-        !data.financialAudits?.some(
-          (a) => a.action === "fixed-candidate-ignored" && a.recordId === e.id,
-        ),
-    )
-    .flatMap((e) => {
-      const r = data.recurringExpenses.find(
-        (r) =>
-          r.isActive &&
-          r.sourceAccountId === e.sourceAccountId &&
-          e.merchant.toLowerCase().includes(r.name.toLowerCase()) &&
-          r.amount !== e.amount &&
-          r.startDate <= e.date &&
-          (!r.endDate || r.endDate >= e.date),
-      );
-      return r ? [{ recurring: r, actual: e.amount, expenseId: e.id }] : [];
-    });
+  const connectedAccounts =
+    data.accounts?.filter(
+      (a) => a.connectionId === connection?.id && a.isActive && !!connection,
+    ) ?? [];
+  const nextRefresh = sync?.nextRefreshAllowedAt
+    ? Date.parse(sync.nextRefreshAllowedAt)
+    : NaN;
+  const nextRead = sync?.lastAttemptAt
+    ? Date.parse(sync.lastAttemptAt) + 60_000
+    : NaN;
+  const waiting = nextRefresh > clock || nextRead > clock;
+  const availableAt = Math.max(
+    Number.isFinite(nextRefresh) ? nextRefresh : 0,
+    Number.isFinite(nextRead) ? nextRead : 0,
+  );
+  const syncing = operation !== null || sync?.status === "syncing";
+  const needsAuthentication =
+    connection?.status === "reauthentication" ||
+    sync?.status === "reauthentication";
+  const feedback = error || sync?.message;
+  const failed =
+    !!error ||
+    [
+      "error",
+      "offline",
+      "maintenance",
+      "rateLimited",
+      "reauthentication",
+    ].includes(sync?.status ?? "");
+
+  useEffect(() => {
+    if (!Number.isFinite(availableAt) || availableAt <= Date.now()) return;
+    const timeout = setTimeout(
+      () => setClock(Date.now()),
+      Math.min(availableAt - Date.now() + 50, 2_147_483_647),
+    );
+    return () => clearTimeout(timeout);
+  }, [availableAt, clock]);
+
+  async function connect() {
+    if (operationGuard.current || !configured) return;
+    operationGuard.current = true;
+    setOperation("connect");
+    setError("");
+    try {
+      await enableAccountManagement();
+      const result = await moneytree.connect();
+      if (!result.authorizationUrl)
+        throw new Error("連携先を開けませんでした。もう一度お試しください。");
+      location.assign(result.authorizationUrl);
+    } catch (cause) {
+      setError(connectionError(cause));
+    } finally {
+      operationGuard.current = false;
+      setOperation(null);
+    }
+  }
+
+  async function refresh() {
+    if (operationGuard.current || !configured || !connection) return;
+    operationGuard.current = true;
+    setOperation("refresh");
+    setError("");
+    try {
+      await syncFinancialConnection(moneytree, connection, true);
+      toast("更新を依頼しました");
+    } catch (cause) {
+      setError(connectionError(cause));
+    } finally {
+      operationGuard.current = false;
+      setClock(Date.now());
+      setOperation(null);
+    }
+  }
+
   return (
     <div className="page financial-settings">
       <header className="page-header">
-        <Link className="icon-button" to="/money" aria-label="お金の置き場所へ">
+        <Link className="icon-button" to="/settings" aria-label="設定へ戻る">
           <ArrowLeft />
         </Link>
         <div>
-          <span className="eyebrow">YOU ARE IN CONTROL</span>
-          <h1>連携とプライバシー</h1>
+          <span className="eyebrow">銀行・カード</span>
+          <h1>銀行・カードの連携</h1>
         </div>
       </header>
-      <section className="surface privacy-center">
-        <ShieldCheck size={30} />
-        <h2>{connection ? "許可した金融連携のみ" : "端末だけで管理中"}</h2>
-        <p>
-          記録・残高・連携の認証情報は、この端末の暗号化した保管庫に保存します。広告・解析・外部AIへの送信はありません。
-        </p>
-        <div className="chips">
-          <span className="chip">端末内で暗号化</span>
-          <span className="chip">レシートは外部送信なし</span>
-        </div>
-        <button className="button button-secondary" onClick={() => lockVault()}>
-          <LockKeyhole size={18} />
-          保管庫をロック
-        </button>
-      </section>
-      <section className="surface">
+
+      <section className="surface connection-overview">
+        <span className="settings-icon">
+          <Landmark />
+        </span>
         <h2>
-          <Landmark size={21} />
-          銀行・カードを連携
+          {configured
+            ? connection
+              ? "Moneytreeとの連携"
+              : "残高・明細を自動で取り込む"
+            : "自動連携はまだ利用できません"}
         </h2>
-        <p>
-          Moneytree
-          LINKを使います。銀行のログイン情報はMoneytree側で入力し、Paceには保存しません。
-        </p>
-        <dl className="capability-list">
-          <div>
-            <dt>横浜銀行・三菱UFJ銀行</dt>
-            <dd>Moneytreeの対応機関。正式設定後に連携可</dd>
-          </div>
-          <div>
-            <dt>三井住友カード・モバイルSuica</dt>
-            <dd>Moneytreeの対応機関。残高・明細は取得時点の情報</dd>
-          </div>
-          <div>
-            <dt>三菱UFJ系カード</dt>
-            <dd>カードの商品名を確認してから選択</dd>
-          </div>
-          <div>
-            <dt>PayPay</dt>
-            <dd>手動管理。ウォレット残高・利用履歴の自動取得は未対応</dd>
-          </div>
-        </dl>
-        <a
-          href="https://institutions.moneytree.jp/"
-          target="_blank"
-          rel="noreferrer"
-          className="text-button"
-        >
-          対応状況を確認 <ExternalLink size={14} />
-        </a>
-        {!moneytree.isConfigured() && (
-          <p className="inline-alert">
-            この配布版は金融連携の正式な接続設定が未設定です。銀行・カードの手動管理は利用できます。
+        {!configured ? (
+          <p>
+            現在のPaceは、自動連携の準備中です。いまは残高の登録とカード明細の取り込みを使えます。
           </p>
-        )}
-        {!connection ? (
+        ) : !connection ? (
           <>
-            <label className="check-field">
-              <input
-                type="checkbox"
-                checked={consent}
-                onChange={(e) => setConsent(e.target.checked)}
-              />
-              Moneytreeへの接続と残高・明細の取得を許可する
-            </label>
+            <p>
+              Moneytreeの画面でログインし、Paceへの連携を許可します。Paceに銀行のパスワードを入力する必要はありません。
+            </p>
             <button
-              className="button button-primary"
-              disabled={!consent || !moneytree.isConfigured() || busy}
-              onClick={() => {
-                setBusy(true);
-                void run(async () => {
-                  await enableAccountManagement();
-                  const result = await moneytree.connect();
-                  if (result.authorizationUrl)
-                    location.assign(result.authorizationUrl);
-                }).finally(() => setBusy(false));
-              }}
+              className="button button-primary full"
+              disabled={syncing}
+              onClick={() => void connect()}
             >
-              Moneytreeに接続
+              {operation === "connect" ? (
+                <LoaderCircle size={19} className="spin" />
+              ) : (
+                <Landmark size={19} />
+              )}
+              {operation === "connect"
+                ? "Moneytreeを開いています…"
+                : "残高・明細の連携を許可して進む"}
             </button>
           </>
         ) : (
           <>
+            <div className="chips">
+              <span className="chip">
+                {needsAuthentication
+                  ? "再認証が必要"
+                  : connectedAccounts.length
+                    ? `${connectedAccounts.length}件の口座を連携中`
+                    : "口座情報を確認中"}
+              </span>
+              <span className="chip">Moneytree</span>
+            </div>
             <p className="microcopy">
-              {connection.status === "connected" ? "接続済み" : "再認証が必要"}{" "}
-              · 最後の取得{" "}
-              {sync?.lastSuccessAt?.slice(0, 16).replace("T", " ") ??
-                "まだ取得していません"}
+              最後の取得：{acquiredAt(sync?.lastSuccessAt)}
             </p>
-            {sync && <p role="status">{sync.message}</p>}
-            <button
-              className="button button-primary"
-              disabled={
-                busy ||
-                sync?.status === "syncing" ||
-                !!(
-                  sync?.nextRefreshAllowedAt &&
-                  Date.parse(sync.nextRefreshAllowedAt) > Date.now()
-                )
-              }
-              onClick={() => {
-                setBusy(true);
-                void run(() =>
-                  syncFinancialConnection(moneytree, connection, true),
-                ).finally(() => setBusy(false));
-              }}
-            >
-              <RefreshCw size={17} />
-              更新を依頼
-            </button>
-            {sync?.nextRefreshAllowedAt && (
-              <small>
-                次の更新依頼：
-                {new Date(sync.nextRefreshAllowedAt).toLocaleString("ja-JP")}
-              </small>
+            {connectedAccounts.length > 0 && (
+              <div className="connection-account-list">
+                {connectedAccounts.map((account) => (
+                  <Link className="settings-row" key={account.id} to="/money">
+                    <span className="settings-icon">
+                      {account.kind === "CREDIT_CARD" ? (
+                        <CreditCard />
+                      ) : (
+                        <Landmark />
+                      )}
+                    </span>
+                    <span>
+                      <b>{account.name}</b>
+                      <small>
+                        {account.snapshotBalance === null
+                          ? "残高は未取得"
+                          : `${account.kind === "CREDIT_CARD" ? "未払い" : "残高"} ${yen(account.snapshotBalance)}`}
+                      </small>
+                    </span>
+                    <ChevronRight size={18} />
+                  </Link>
+                ))}
+              </div>
             )}
-            {connection.status === "reauthentication" && (
+            {!connectedAccounts.length && sync?.lastSuccessAt && (
+              <p className="inline-alert">
+                連携した口座がありません。Moneytreeで銀行・カードの登録とPaceへの許可を確認してください。
+              </p>
+            )}
+            {needsAuthentication ? (
               <button
-                className="button button-secondary"
-                onClick={() =>
-                  void run(async () => {
-                    const r = await moneytree.connect();
-                    if (r.authorizationUrl) location.assign(r.authorizationUrl);
-                  })
-                }
+                className="button button-primary full"
+                disabled={syncing}
+                onClick={() => void connect()}
               >
-                再認証する
+                {operation === "connect" && (
+                  <LoaderCircle size={19} className="spin" />
+                )}
+                {operation === "connect"
+                  ? "Moneytreeを開いています…"
+                  : "Moneytreeで再認証する"}
+              </button>
+            ) : (
+              <button
+                className="button button-primary full"
+                disabled={syncing || waiting}
+                onClick={() => void refresh()}
+              >
+                <RefreshCw size={18} className={syncing ? "spin" : ""} />
+                {syncing
+                  ? "残高・明細を取得しています…"
+                  : waiting
+                    ? "次の更新を待っています"
+                    : "残高・明細を更新"}
               </button>
             )}
+            {waiting && !needsAuthentication && (
+              <p className="hint" role="status">
+                次に更新できる時刻：
+                {acquiredAt(new Date(availableAt).toISOString())}
+              </p>
+            )}
+            <p className="hint">
+              銀行・カードの情報は、更新を依頼してから反映されるまで時間がかかることがあります。
+            </p>
             <button
               className="text-button danger"
+              disabled={syncing}
               onClick={() => setDisconnect(true)}
             >
-              金融連携を解除
+              連携を解除する
             </button>
           </>
         )}
-        <p className="hint">
-          更新依頼後、情報が反映されるまで時間がかかることがあります。利用可能な更新回数に合わせて間隔を空けます。
-        </p>
-      </section>
-      <section className="surface">
-        <h2>PayPay・Suica</h2>
-        <p>チャージは使ったお金ではなく振替。支払いを支出として記録します。</p>
-        <div className="action-row">
-          <a className="button button-secondary" href="paypay://passbook">
-            PayPayウォレットを開く
-          </a>
-          <Link className="button button-secondary" to="/money">
-            チャージを振替で記録
-          </Link>
-        </div>
-        <p className="hint">
-          SuicaのチャージはWallet／モバイルSuicaで操作し、Paceに戻って振替を記録してください。
-        </p>
-      </section>
-      <section className="surface">
-        <h2>給与のサイクル</h2>
-        <AsyncForm
-          label="サイクルを保存"
-          onSubmit={async (f) => {
-            await updateSettings({
-              budgetCycle: {
-                mode: textValue(f, "mode") as "calendar" | "salary",
-                startDay: Number(f.get("day")),
-              },
-            });
-            toast("サイクルを保存しました");
-          }}
-        >
-          <Field label="予算の期間">
-            <select
-              name="mode"
-              defaultValue={data.settings.budgetCycle?.mode ?? "calendar"}
-            >
-              <option value="salary">給料日から次の給料日前日</option>
-              <option value="calendar">カレンダーの月</option>
-            </select>
-          </Field>
-          <Field label="サイクル開始日">
-            <input
-              name="day"
-              type="number"
-              min={1}
-              max={31}
-              required
-              defaultValue={data.settings.budgetCycle?.startDay ?? 10}
-            />
-          </Field>
-          <p className="hint">
-            10日なら10日〜翌月9日。実際の給与が休日に前倒しされても期間は変えません。予定収入を残高に加えません。
-          </p>
-        </AsyncForm>
-      </section>
-      <section className="surface">
-        <h2>固定費の候補</h2>
-        <p className="hint">
-          必要なものを選び、支払日と支払元を確認して追加します。
-        </p>
-        <div className="chips">
-          {fixedCostCandidates
-            .filter(
-              (c) => !data.recurringExpenses.some((r) => r.name === c.name),
-            )
-            .map((c) => (
-              <button
-                className="chip"
-                key={c.name}
-                onClick={() => setCandidate(c)}
-              >
-                {c.name} · {yen(c.amount)}
-              </button>
-            ))}
-        </div>
-        {differences.map((d) => (
-          <button
-            className="settings-row"
-            key={d.expenseId}
-            onClick={() => setRecurringDifference(d)}
+        {feedback && (
+          <p
+            className={failed ? "inline-alert" : "hint"}
+            role={failed ? "alert" : "status"}
           >
-            <span>
-              <b>{d.recurring.name}の金額が違います</b>
-              <small>
-                予定 {yen(d.recurring.amount)} → 実績 {yen(d.actual)}
-              </small>
-            </span>
-            <span>確認 →</span>
-          </button>
-        ))}
-      </section>
-      <section className="surface">
-        <h2>
-          <Bell size={21} />
-          毎日のリマインダー
-        </h2>
-        <AsyncForm
-          label="リマインダーを保存"
-          onSubmit={async (f) => {
-            const enabled = f.get("enabled") === "on",
-              delivery = textValue(f, "delivery") as "calendar" | "foreground";
-            if (enabled && delivery === "foreground")
-              await enableForegroundNotifications();
-            await updateSettings({
-              reminder: {
-                enabled,
-                time: textValue(f, "time"),
-                privacyMode: "generic",
-                delivery,
-              },
-            });
-            toast("保存しました");
-          }}
-        >
-          <label className="check-field">
-            <input
-              name="enabled"
-              type="checkbox"
-              defaultChecked={reminder.enabled}
-            />
-            リマインダーを使う
-          </label>
-          <Field label="時刻">
-            <input
-              name="time"
-              required
-              type="time"
-              defaultValue={reminder.time}
-            />
-          </Field>
-          <Field label="通知方法">
-            <select name="delivery" defaultValue={reminder.delivery}>
-              <option value="calendar">カレンダーに毎日の予定を追加</option>
-              <option value="foreground">アプリを開いている間の通知</option>
-            </select>
-          </Field>
-          <p className="hint">
-            通知文は「今日のPaceを確認してください」。残高は通知に載せません。PWAだけでは、アプリを閉じた状態で毎日時刻どおりの通知を予約できません。
+            {feedback}
           </p>
-        </AsyncForm>
-        {reminder.enabled && reminder.delivery === "calendar" && (
-          <button
-            className="button button-secondary"
-            onClick={() =>
-              saveAs(
-                new Blob([buildDailyReminder(reminder.time, today)], {
-                  type: "text/calendar;charset=utf-8",
-                }),
-                "pace-daily-reminder.ics",
-              )
-            }
-          >
-            カレンダー用ファイルを作成
-          </button>
         )}
-        <p className="hint">
-          OFFにした場合、追加済みのカレンダーの予定はカレンダー側で削除してください。
-        </p>
+        {configured && (
+          <a
+            href="https://institutions.moneytree.jp/"
+            target="_blank"
+            rel="noreferrer"
+            className="text-button"
+          >
+            対応する銀行・カードを確認 <ExternalLink size={14} />
+          </a>
+        )}
       </section>
+
+      <section className="surface settings-group">
+        <div className="settings-section-heading">
+          <h2>いま使える管理方法</h2>
+          <p className="hint">金融連携を使わなくても、Paceで管理できます。</p>
+        </div>
+        <Link className="settings-row" to="/money?add=account">
+          <span className="settings-icon">
+            <Wallet />
+          </span>
+          <span>
+            <b>銀行・電子マネーの残高を登録</b>
+            <small>名前と現在の残高を入れるだけ</small>
+          </span>
+          <ChevronRight size={18} />
+        </Link>
+        <Link className="settings-row" to="/manage/cards?import=1">
+          <span className="settings-icon">
+            <FileSpreadsheet />
+          </span>
+          <span>
+            <b>カード明細（CSV）を取り込む</b>
+            <small>カード会社のCSVファイルを選ぶ</small>
+          </span>
+          <ChevronRight size={18} />
+        </Link>
+        <Link className="settings-row" to="/money">
+          <span className="settings-icon">
+            <Landmark />
+          </span>
+          <span>
+            <b>登録した口座・残高を見る</b>
+            <small>残高の確認・チャージ・振替</small>
+          </span>
+          <ChevronRight size={18} />
+        </Link>
+      </section>
+
+      <Link className="settings-row surface" to="/privacy">
+        <span className="settings-icon">
+          <ShieldCheck />
+        </span>
+        <span>
+          <b>プライバシーとデータの保護</b>
+          <small>暗号化・アプリロック・バックアップ</small>
+        </span>
+        <ChevronRight size={18} />
+      </Link>
+
       {disconnect && connection && (
-        <Sheet title="金融連携を解除" onClose={() => setDisconnect(false)}>
+        <Sheet
+          title="Moneytreeとの連携を解除"
+          onClose={() => setDisconnect(false)}
+        >
           <AsyncForm
-            label="認可を取り消して解除"
-            onSubmit={async (f) => {
+            label="連携を解除する"
+            onSubmit={async (form) => {
               await disconnectFinancialConnection(
                 moneytree,
                 connection.id,
-                f.get("remove") === "on",
+                form.get("remove") === "on",
               );
               setDisconnect(false);
+              setError("");
               toast("連携を解除しました。残高は手動管理に引き継ぎます。");
             }}
           >
             <p>
-              Moneytreeの認可と端末内の認証情報を削除します。手入力の記録は残します。
+              Moneytreeの認可と端末内の認証情報を削除します。手入力の記録と現在の残高は残します。
             </p>
             <label className="check-field">
               <input name="remove" type="checkbox" />
-              取得した明細・支出・入金も削除する
+              取り込んだ明細・支出・入金も削除する
             </label>
-          </AsyncForm>
-        </Sheet>
-      )}
-      {candidate && (
-        <Sheet
-          title={`${candidate.name}を追加`}
-          onClose={() => setCandidate(null)}
-        >
-          <AsyncForm
-            onSubmit={async (f) => {
-              const a = data.accounts?.find(
-                (a) => a.id === textValue(f, "account"),
-              );
-              if (!a) throw new Error("支払元を選んでください。");
-              await db.recurringExpenses.add({
-                id: crypto.randomUUID(),
-                name: textValue(f, "name"),
-                amount: money(f.get("amount")),
-                categoryId: "fixed",
-                subcategoryId: "",
-                paymentMethod:
-                  a.kind === "CREDIT_CARD"
-                    ? "creditCard"
-                    : a.kind === "CASH"
-                      ? "cash"
-                      : a.kind === "BANK"
-                        ? "bank"
-                        : "other",
-                creditCardId: a.creditCardId,
-                sourceAccountId: a.id,
-                frequency: "monthly",
-                dueDay: Number(f.get("day")),
-                startDate: today,
-                isActive: true,
-                note: "",
-              });
-              setCandidate(null);
-              toast("固定費を追加しました");
-            }}
-          >
-            <Field label="名前">
-              <input name="name" required defaultValue={candidate.name} />
-            </Field>
-            <Field label="金額">
-              <input
-                name="amount"
-                required
-                type="number"
-                min={1}
-                defaultValue={candidate.amount}
-              />
-            </Field>
-            <Field label="支払日">
-              <input
-                name="day"
-                required
-                type="number"
-                min={1}
-                max={31}
-                placeholder="1〜31"
-              />
-            </Field>
-            <Field label="支払元">
-              <select name="account" required defaultValue="">
-                <option value="">選択してください</option>
-                {data.accounts
-                  ?.filter((a) => a.isActive)
-                  .map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
-                    </option>
-                  ))}
-              </select>
-            </Field>
-          </AsyncForm>
-        </Sheet>
-      )}
-      {recurringDifference && (
-        <Sheet
-          title="固定費の金額を確認"
-          onClose={() => setRecurringDifference(null)}
-        >
-          <p>
-            実績 {yen(recurringDifference.actual)} · 予定{" "}
-            {yen(recurringDifference.recurring.amount)}
-          </p>
-          <AsyncForm
-            label="確認する"
-            onSubmit={async (f) => {
-              const d = recurringDifference;
-              await db.transaction(
-                "rw",
-                db.expenses,
-                db.recurringExpenses,
-                db.recurringOccurrences,
-                db.financialAudits,
-                async () => {
-                  const choice = textValue(f, "choice");
-                  if (choice === "future")
-                    await db.recurringExpenses.update(d.recurring.id, {
-                      amount: d.actual,
-                    });
-                  if (choice !== "ignore") {
-                    const e = data.expenses.find((e) => e.id === d.expenseId)!;
-                    const due = `${e.date.slice(0, 7)}-${String(Math.min(d.recurring.dueDay, new Date(Number(e.date.slice(0, 4)), Number(e.date.slice(5, 7)), 0).getDate())).padStart(2, "0")}`;
-                    const occurrenceId = `${d.recurring.id}:${e.date.slice(0, 7)}`;
-                    if (await db.recurringOccurrences.get(occurrenceId))
-                      throw new Error("この月の固定費は確認済みです。");
-                    await db.expenses.update(d.expenseId, {
-                      isFixedCost: true,
-                      recurringOccurrenceId: occurrenceId,
-                    });
-                    await db.recurringOccurrences.put({
-                      id: occurrenceId,
-                      recurringExpenseId: d.recurring.id,
-                      dueDate: due,
-                      status: "paid",
-                      expenseId: d.expenseId,
-                    });
-                  } else
-                    await db.financialAudits.add({
-                      ...stamp(),
-                      action: "fixed-candidate-ignored",
-                      recordId: d.expenseId,
-                      detail:
-                        "固定費候補を利用者が見送り。支出・予定は変更しない",
-                    });
-                },
-              );
-              setRecurringDifference(null);
-              toast("確認しました");
-            }}
-          >
-            <Field label="金額変更の扱い">
-              <select name="choice">
-                <option value="once">今回だけ実績の金額にする</option>
-                <option value="future">今後の予定金額も変更する</option>
-                <option value="ignore">固定費として照合しない</option>
-              </select>
-            </Field>
-            <small>
-              照合しない場合は通常の支出として残り、固定費の支払い予定も残ります。
-            </small>
+            <p className="hint">
+              チェックを入れなければ、取り込んだ記録も残します。
+            </p>
           </AsyncForm>
         </Sheet>
       )}

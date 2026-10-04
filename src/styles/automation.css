@@ -189,6 +189,78 @@
 .financial-settings .microcopy {
   display: block;
 }
+.settings-page .settings-row,
+.financial-settings .settings-row {
+  min-height: 68px;
+  gap: 12px;
+}
+.settings-page .settings-icon,
+.financial-settings .settings-icon,
+.financial-settings .settings-row > svg:last-child {
+  flex-shrink: 0;
+}
+.settings-page .settings-row b,
+.financial-settings .settings-row b {
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.settings-page .settings-row small,
+.financial-settings .settings-row small {
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.7;
+}
+.financial-settings .page-header > div {
+  min-width: 0;
+}
+.financial-settings .page-header h1 {
+  font-size: clamp(1.2rem, 5vw, 1.6rem);
+  line-height: 1.5;
+}
+.financial-settings .connection-overview > .settings-icon {
+  width: 44px;
+  height: 44px;
+  margin-bottom: 16px;
+  border-radius: 14px;
+}
+.financial-settings .connection-overview p {
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+.financial-settings > .settings-group {
+  padding: 0 18px;
+}
+.financial-settings .settings-section-heading {
+  padding: 20px 0 10px;
+}
+.financial-settings .settings-section-heading p {
+  margin: 0;
+  font-size: 0.8rem;
+}
+.financial-settings .settings-section-heading h2 {
+  margin-bottom: 5px;
+}
+.financial-settings > .settings-row.surface {
+  padding: 15px 18px;
+}
+.financial-settings .button {
+  min-height: 48px;
+  height: auto;
+  white-space: normal;
+  line-height: 1.6;
+}
+.financial-settings .connection-account-list {
+  margin: 12px 0 18px;
+}
+.card-import-start {
+  display: grid;
+  gap: 10px;
+  margin: 24px 0;
+}
+.card-import-start h2,
+.card-import-start p {
+  margin: 0;
+}
 .receipt-preview {
   max-height: 260px;
   width: 100%;
@@ -255,5 +327,192 @@
 @media (prefers-reduced-motion: reduce) {
   .receipt-progress * {
     animation: none !important;
+  }
+}
+
+/* Focused settings pages use the same tokens in every theme and color mode. */
+.dedicated-settings .page-header {
+  align-items: flex-start;
+}
+.dedicated-settings .page-header > div {
+  min-width: 0;
+}
+.dedicated-settings .page-header h1 {
+  font-size: clamp(1.28rem, 4.8vw, 1.7rem);
+  line-height: 1.45;
+  letter-spacing: -0.035em;
+  overflow-wrap: anywhere;
+}
+.dedicated-settings .page-header .subtitle {
+  margin: 5px 0 0;
+  font-size: 0.83rem;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.dedicated-settings > .surface,
+.dedicated-settings .settings-page-form > .surface {
+  padding: 20px;
+  margin-bottom: 18px;
+}
+.dedicated-settings h2 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 1.06rem;
+  line-height: 1.5;
+  margin: 0 0 18px;
+  overflow-wrap: anywhere;
+}
+.dedicated-settings h2 > svg,
+.dedicated-settings .note-panel > svg {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.dedicated-settings .settings-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+.dedicated-settings .settings-summary > svg {
+  flex-shrink: 0;
+  width: 46px;
+  height: 46px;
+  padding: 10px;
+  border-radius: 15px;
+  background: var(--soft);
+  color: var(--accent);
+}
+.dedicated-settings .settings-summary > div {
+  min-width: 0;
+}
+.dedicated-settings .settings-summary h2 {
+  margin: 0 0 5px;
+}
+.dedicated-settings .settings-summary p {
+  margin: 0;
+  font-size: 0.81rem;
+  line-height: 1.75;
+}
+.dedicated-settings .field input,
+.dedicated-settings .field select {
+  color: var(--text);
+  max-width: 100%;
+}
+.dedicated-settings .field > small,
+.dedicated-settings .hint {
+  font-size: 0.81rem;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.dedicated-settings .check-field {
+  min-height: 48px;
+  padding: 8px 0;
+  cursor: pointer;
+}
+.dedicated-settings .setting-toggle {
+  background: var(--subtle);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  padding: 12px 14px;
+  margin-bottom: 20px;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+.dedicated-settings .check-field:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+.dedicated-settings .form-footer {
+  position: static;
+  margin-top: 20px;
+  padding: 0;
+  background: transparent;
+}
+.dedicated-settings .button {
+  min-height: 48px;
+  height: auto;
+  white-space: normal;
+  line-height: 1.5;
+}
+.dedicated-settings .reminder-note {
+  margin: 0 0 16px;
+  color: var(--text);
+}
+.dedicated-settings .reminder-note > span {
+  min-width: 0;
+}
+.dedicated-settings .reminder-privacy {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.dedicated-settings .reminder-privacy > svg {
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: var(--accent);
+}
+.dedicated-settings .period-preview {
+  display: grid;
+  gap: 7px;
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px;
+  margin: 16px 0;
+}
+.dedicated-settings .period-preview .hint {
+  margin: 0;
+}
+.dedicated-settings .period-preview strong {
+  font-size: 0.97rem;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.dedicated-settings > .settings-row.surface {
+  padding: 16px 20px;
+}
+.dedicated-settings > .settings-group {
+  padding: 0 18px;
+}
+.dedicated-settings .settings-row {
+  gap: 12px;
+  min-height: 74px;
+}
+.dedicated-settings .settings-icon,
+.dedicated-settings .settings-row > svg:last-child {
+  flex-shrink: 0;
+}
+.dedicated-settings .settings-row b {
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.dedicated-settings .settings-row small {
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.7;
+}
+.dedicated-settings .privacy-facts {
+  display: grid;
+  gap: 13px;
+  padding-left: 21px;
+  margin: 0 0 18px;
+  font-size: 0.87rem;
+  line-height: 1.85;
+}
+.dedicated-settings .privacy-facts li::marker {
+  color: var(--accent);
+}
+@media (max-width: 390px) {
+  .dedicated-settings > .surface,
+  .dedicated-settings .settings-page-form > .surface {
+    padding: 18px;
+  }
+  .dedicated-settings .settings-summary {
+    gap: 11px;
+  }
+  .dedicated-settings .settings-summary > svg {
+    width: 42px;
+    height: 42px;
+    padding: 9px;
   }
 }

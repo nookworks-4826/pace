@@ -1,6 +1,6 @@
 {
   "name": "pace-local-finance",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -14,6 +14,7 @@
     "test:offline": "node scripts/qa-offline.mjs",
     "test:update": "node scripts/qa-update-vault.mjs",
     "test:financial": "node scripts/qa-financial.mjs",
+    "test:settings": "node scripts/qa-settings.mjs",
     "test:receipts": "node scripts/qa-receipts.mjs",
     "test:exports": "node scripts/qa-export-privacy.mjs",
     "test:passkeys": "node scripts/qa-passkeys.mjs",

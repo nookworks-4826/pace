@@ -1,5 +1,10 @@
-import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import {
+  Link,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import {
   ArrowLeft,
   CreditCard as CardIcon,
@@ -43,6 +48,7 @@ import type {
   SavingsGoal,
 } from "../types";
 import { CardImport } from "./CardImport";
+import { FixedCostSuggestions } from "./FixedCostSuggestions";
 
 type Entity = CreditCard | Debt | SavingsGoal | RecurringExpense | Income;
 type Mode =
@@ -67,9 +73,11 @@ export type Editor = {
 export function FinanceEditor({
   editor,
   onClose,
+  onSaved,
 }: {
   editor: Editor;
   onClose: () => void;
+  onSaved?: () => void;
 }) {
   const { data, today, finance, toast } = usePace();
   const { mode, entity } = editor;
@@ -513,6 +521,7 @@ export function FinanceEditor({
         break;
       }
     }
+    onSaved?.();
     onClose();
     toast("保存しました");
   }
@@ -1001,9 +1010,23 @@ export function FinanceEditor({
 export function Management() {
   const { section = "cards" } = useParams();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data, finance, today, run, toast, openExpense } = usePace();
   const [editor, setEditor] = useState<Editor | null>(null);
   const [importing, setImporting] = useState(false);
+  const [pendingImport, setPendingImport] = useState(false);
+  useEffect(() => {
+    if (section === "cards" && searchParams.get("import") === "1")
+      setImporting(true);
+  }, [section, searchParams]);
+  const closeImport = () => {
+    setImporting(false);
+    if (searchParams.has("import")) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("import");
+      setSearchParams(next, { replace: true });
+    }
+  };
   const meta: Record<string, { title: string; subtitle: string; mode: Mode }> =
     {
       cards: {
@@ -1618,6 +1641,7 @@ export function Management() {
       )}
       {section === "recurring" && (
         <>
+          <FixedCostSuggestions />
           <div className="note-panel">
             <CalendarClock size={20} />
             <span>
@@ -1809,14 +1833,28 @@ export function Management() {
         </button>
       )}
       {editor && (
-        <FinanceEditor editor={editor} onClose={() => setEditor(null)} />
+        <FinanceEditor
+          editor={editor}
+          onClose={() => {
+            setEditor(null);
+            setPendingImport(false);
+          }}
+          onSaved={() => {
+            if (pendingImport) setImporting(true);
+          }}
+        />
       )}
       {importing && (
         <CardImport
           data={data}
-          onClose={() => setImporting(false)}
-          onImported={() => {
+          onClose={closeImport}
+          onAddCard={() => {
             setImporting(false);
+            setPendingImport(true);
+            setEditor({ mode: "card" });
+          }}
+          onImported={() => {
+            closeImport();
             toast("カード利用を取り込みました");
           }}
         />

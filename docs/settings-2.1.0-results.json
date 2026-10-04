@@ -1,0 +1,213 @@
+{
+  "version": "2.1.0",
+  "unitTests": {
+    "files": 17,
+    "passed": 233,
+    "failed": 0,
+    "durationSeconds": 30.78
+  },
+  "environment": {
+    "node": "24.21.0",
+    "timeZone": "UTC",
+    "browser": "Chrome headless"
+  },
+  "build": {
+    "passed": true,
+    "strictTypeScript": true,
+    "pwa": true,
+    "projectBase": "/pace/"
+  },
+  "publicDeploymentPerformed": false,
+  "realFinancialConnectionVerified": false,
+  "realIOSAndGalaxyDevicesVerified": false,
+  "scope": "Fictional fixtures in isolated browser contexts; no real user records or credentials.",
+  "settings": {
+    "passed": true,
+    "checks": [
+      "Separate settings links reach bank/card connection, notifications, salary period and privacy",
+      "Budget period and expected payday remain independently editable and saved",
+      "Unavailable automatic linking gives an immediate usable manual account form without changing the user's budget period",
+      "The CSV shortcut adds the first card and resumes file selection, preview and an actual encrypted expense import",
+      "Repeated CSV import leaves duplicate rows unselected and cannot silently duplicate recorded spending",
+      "Reminder setup creates one generic daily calendar file during the submit gesture without financial data",
+      "Privacy actions open the correct settings sheets and closing removes the panel URL",
+      "Separated settings, account editor and CSV importer fit 375/390px in both light and dark modes",
+      "OAuth parameters are removed before unlock and a first connection failure is visible without losing existing records"
+    ],
+    "errors": [],
+    "overflows": [],
+    "foreignRequests": [],
+    "fictionalProfileOnly": true,
+    "moneytreeConfigured": false,
+    "screenshots": "screenshots/settings-*"
+  },
+  "independentSettingsReview": {
+    "passed": true,
+    "checks": [
+      "Independent payday 25 and period day 31 preserved; expected pay is not recorded income",
+      "Calendar mode hides irrelevant empty day without blocking save or losing stored day",
+      "One tap prepares generic daily .ics, saves the chosen time, and shows import-required wording",
+      "Denied notification permission leaves all persisted reminder settings unchanged",
+      "Privacy lock/backup links open the correct sheet; close removes query and Back returns to Privacy"
+    ],
+    "layouts": [
+      {
+        "mode": "light",
+        "page": "salary",
+        "width": 375,
+        "scroll": 375,
+        "targets": [
+          52,
+          48
+        ],
+        "color": "rgb(32, 48, 71)"
+      },
+      {
+        "mode": "light",
+        "page": "notifications",
+        "width": 375,
+        "scroll": 375,
+        "targets": [
+          52
+        ],
+        "color": "rgb(32, 48, 71)"
+      },
+      {
+        "mode": "light",
+        "page": "privacy",
+        "width": 375,
+        "scroll": 375,
+        "targets": [],
+        "color": "rgb(32, 48, 71)"
+      },
+      {
+        "mode": "dark",
+        "page": "salary",
+        "width": 375,
+        "scroll": 375,
+        "targets": [
+          52,
+          48
+        ],
+        "color": "rgb(240, 244, 247)"
+      },
+      {
+        "mode": "dark",
+        "page": "notifications",
+        "width": 375,
+        "scroll": 375,
+        "targets": [
+          52
+        ],
+        "color": "rgb(240, 244, 247)"
+      },
+      {
+        "mode": "dark",
+        "page": "privacy",
+        "width": 375,
+        "scroll": 375,
+        "targets": [],
+        "color": "rgb(240, 244, 247)"
+      }
+    ],
+    "pageErrors": [],
+    "externalRequests": []
+  },
+  "legacyMigration": {
+    "previous": "1.3.0",
+    "current": "2.1.0",
+    "projectBase": "/pace/",
+    "legacyPinVerifiedBeforeMigration": true,
+    "allLegacyTablesEqualAfterIndependentDecryption": true,
+    "plaintextAbsent": true,
+    "pinConfigurationPreserved": true,
+    "draftPreserved": true,
+    "offlineVaultAndPinUnlock": true,
+    "encryptedAppUpdatePreservesData": true,
+    "updateGuardWhileEditing": true,
+    "externalRequests": 0,
+    "pageErrors": 0
+  },
+  "privacy": {
+    "generatedAt": "2026-10-04T02:35:47.033Z",
+    "passed": true,
+    "checks": [
+      {
+        "name": "Runtime source excludes plaintext browser storage, console output and client secrets",
+        "passed": true,
+        "sourceFiles": 61,
+        "publicMetadataStorage": [
+          "src/domain/security.ts"
+        ],
+        "networkCallSites": [
+          "src/providers/moneytree/index.ts"
+        ]
+      },
+      {
+        "name": "Moneytree API restricts token destination and disables browser response caching",
+        "passed": true
+      },
+      {
+        "name": "Service Worker caches static app/OCR assets only; receipt image saving is explicit and OCR remains local",
+        "passed": true
+      },
+      {
+        "name": "Atomic legacy migration decrypts every seeded financial record and draft unchanged",
+        "passed": true
+      },
+      {
+        "name": "Native IndexedDB inspection: every non-metadata store is encrypted; every persisted index is blinded",
+        "passed": true,
+        "tableCounts": {
+          "expenses": 1,
+          "incomes": 1,
+          "cards": 1,
+          "cardPayments": 1,
+          "debts": 1,
+          "repayments": 1,
+          "recurringExpenses": 1,
+          "recurringOccurrences": 1,
+          "savingsGoals": 1,
+          "savingsContributions": 1,
+          "budgets": 1,
+          "settings": 1,
+          "merchantRules": 1,
+          "categories": 11,
+          "balanceAdjustments": 1,
+          "dailyCheckIns": 1,
+          "favorites": 1,
+          "drafts": 1,
+          "accounts": 2,
+          "transfers": 1,
+          "financialConnections": 1,
+          "externalTransactions": 1,
+          "syncStates": 1,
+          "receipts": 1,
+          "salaryRules": 1,
+          "financialAudits": 1,
+          "accountAdjustments": 1,
+          "providerCredentials": 1,
+          "vaultMeta": 1
+        }
+      },
+      {
+        "name": "Fresh IVs, locked-tab rejection, key disposal and wrong-passphrase preservation",
+        "passed": true
+      },
+      {
+        "name": "Schema 1 compatibility, schema 2 round trip and encrypted export; provider credentials excluded",
+        "passed": true
+      },
+      {
+        "name": "Injected migration failure leaves all legacy records intact and the vault disabled",
+        "passed": true
+      },
+      {
+        "name": "Mock/manual and unconfigured Moneytree adapters perform zero network requests or credential writes",
+        "passed": true,
+        "networkRequests": 0
+      }
+    ],
+    "scope": "Runtime source review and disposable fake IndexedDB with fictional fixtures; not a penetration test or device-storage recovery guarantee."
+  }
+}

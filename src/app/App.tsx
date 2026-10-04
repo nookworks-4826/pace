@@ -42,11 +42,15 @@ import { ExpenseSheet } from "../features/ExpenseSheet";
 import { Onboarding } from "../features/Onboarding";
 import { LockScreen } from "../features/Security";
 import { Timeline } from "../features/Timeline";
-import { VaultGate } from '../features/VaultGate';
-import { Money } from '../features/Money';
-import { FinancialSettings } from '../features/FinancialSettings';
-import { useFinancialConnections } from '../hooks/useFinancialConnections';
-import { useFinancialReminder } from '../hooks/useFinancialReminder';
+import { VaultGate } from "../features/VaultGate";
+import { Money } from "../features/Money";
+import { FinancialSettings } from "../features/FinancialSettings";
+import { NotificationSettings } from "../features/NotificationSettings";
+import { SalarySettings } from "../features/SalarySettings";
+import { PrivacySettings } from "../features/PrivacySettings";
+import { FinancialProviderError } from "../providers/types";
+import { useFinancialConnections } from "../hooks/useFinancialConnections";
+import { useFinancialReminder } from "../hooks/useFinancialReminder";
 import { APP_NAME } from "../types";
 import type { Expense } from "../types";
 const Analytics = lazy(() =>
@@ -140,7 +144,8 @@ function Application() {
         if (success) toast(success);
       } catch (e) {
         const message =
-          e instanceof Error && e.name === "Error"
+          e instanceof Error &&
+          (e.name === "Error" || e instanceof FinancialProviderError)
             ? e.message
             : "操作を完了できませんでした。保存領域の空き容量を確認して、もう一度お試しください。";
         toast(message);
@@ -314,6 +319,9 @@ function Application() {
               <Route path="/settings" element={<Settings />} />
               <Route path="/money" element={<Money />} />
               <Route path="/financial" element={<FinancialSettings />} />
+              <Route path="/notifications" element={<NotificationSettings />} />
+              <Route path="/salary" element={<SalarySettings />} />
+              <Route path="/privacy" element={<PrivacySettings />} />
               <Route path="/manage/:section" element={<Management />} />
               <Route path="/timeline" element={<Timeline />} />
               <Route path="*" element={<Navigate to="/" replace />} />
@@ -387,7 +395,9 @@ export function App() {
   return (
     <ErrorBoundary>
       <HashRouter>
-        <VaultGate><Application /></VaultGate>
+        <VaultGate>
+          <Application />
+        </VaultGate>
       </HashRouter>
     </ErrorBoundary>
   );
