@@ -332,7 +332,7 @@ export function FinancialInbox() {
               <>
                 <label className="check-field">
                   <input name="salary" type="checkbox" />
-                  給与入金（同じ入金元を次回から判定）
+                  給与入金として記録
                 </label>
                 <Field label="返金の場合：元の支出">
                   <select

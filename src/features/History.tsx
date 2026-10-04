@@ -77,7 +77,7 @@ export function ExpenseRow({
             {expense.receiptId
               ? " · レシート"
               : expense.providerId === "moneytree"
-                ? " · 自動取得"
+                ? " · 保存済み明細"
                 : expense.providerId === "mock"
                   ? " · テスト明細"
                   : ""}

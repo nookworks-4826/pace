@@ -182,7 +182,7 @@ function AccountEditor({
         )}
         {account?.balanceSource === "provider" && (
           <p className="hint">
-            手動で確認した残高です。次回の自動取得でサービスの残高に置き換わります。
+            確認した残高を保存して管理します。残高が変わったら、ここで更新できます。
           </p>
         )}
         {account?.connectionId && (
@@ -216,7 +216,7 @@ function AccountEditor({
                 void run(async () => {
                   if (
                     !confirm(
-                      "同じ口座として統合しますか？取得した残高を使い、過去の記録は引き継ぎます。",
+                      "同じ口座として統合しますか？保存済みの残高を使い、過去の記録は引き継ぎます。",
                     )
                   )
                     return;
@@ -415,7 +415,7 @@ export function TransferEditor({
               {preview.toAfter === null ? "未確認" : yen(preview.toAfter)}
             </p>
             {externalIds && (
-              <small>自動取得済みの側は残高から再計上しません。</small>
+              <small>残高に含まれている側は二重に計上しません。</small>
             )}
           </div>
         )}
@@ -470,7 +470,7 @@ export function Money() {
         <Link
           className="icon-button"
           to="/financial"
-          aria-label="銀行・カードの連携"
+          aria-label="口座・カードの管理"
         >
           <Settings2 />
         </Link>
@@ -526,9 +526,9 @@ export function Money() {
                   の未払いを確認
                 </b>
                 <small>
-                  取得額 {yen(a.providerBalance)} · 台帳 {yen(a.ledgerBalance)}{" "}
-                  · 差 {yen(a.difference)}
-                  。取得前の利用・未確定・入力漏れを確認できます。
+                  保存した額 {yen(a.providerBalance)} · 台帳{" "}
+                  {yen(a.ledgerBalance)} · 差 {yen(a.difference)}
+                  。未確定の利用や入力漏れを確認できます。
                 </small>
               </span>
               <span>→</span>
@@ -555,11 +555,9 @@ export function Money() {
                   <b>{b.account.name}</b>
                   <small>
                     {kindLabels[b.account.kind]} ·{" "}
-                    {b.account.automationLevel === "automatic"
-                      ? "自動取得"
-                      : b.account.automationLevel === "semi"
-                        ? "確認して入力"
-                        : "手動"}
+                    {b.account.balanceSource === "provider"
+                      ? "保存済みの残高"
+                      : "手入力"}
                   </small>
                   <strong>
                     {b.balance === null ? "未確認" : yen(b.balance)}
@@ -611,7 +609,7 @@ export function Money() {
             振替・チャージ・ATM
           </button>
           <Link className="settings-row surface" to="/financial">
-            <b>銀行・カードの連携</b>
+            <b>口座・カードの管理</b>
             <span>→</span>
           </Link>
           <FinancialInbox />
