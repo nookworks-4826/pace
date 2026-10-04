@@ -49,7 +49,6 @@ import { NotificationSettings } from "../features/NotificationSettings";
 import { SalarySettings } from "../features/SalarySettings";
 import { PrivacySettings } from "../features/PrivacySettings";
 import { FinancialProviderError } from "../providers/types";
-import { useFinancialConnections } from "../hooks/useFinancialConnections";
 import { useFinancialReminder } from "../hooks/useFinancialReminder";
 import { APP_NAME } from "../types";
 import type { Expense } from "../types";
@@ -108,7 +107,6 @@ function AnalyticsRoute() {
 }
 function Application() {
   const { data, error } = useAppData();
-  useFinancialConnections(data);
   useFinancialReminder(data);
   const [today, setToday] = useState(todayJST());
   const [expense, setExpense] = useState<Expense | true | null>(null);

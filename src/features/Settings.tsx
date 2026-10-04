@@ -121,11 +121,7 @@ export function Settings() {
         <ShieldCheck size={24} />
         <div>
           <b>お金の情報は、暗号化した保管庫に。</b>
-          <p>
-            {data.financialConnections?.some((c) => c.status === "connected")
-              ? "許可した金融連携だけを使用します。"
-              : "金融連携は任意。広告・解析はありません。"}
-          </p>
+          <p>手入力とCSVで管理します。広告・解析はありません。</p>
         </div>
       </div>
       <h2 className="settings-label">お金の管理</h2>
@@ -151,13 +147,13 @@ export function Settings() {
         {row(<Target />, "予算の金額", () => setEditor({ mode: "budget" }))}
         {link(<CalendarDays />, "お金のタイムライン", "/timeline")}
       </div>
-      <h2 className="settings-label">連携と取り込み</h2>
+      <h2 className="settings-label">残高と明細</h2>
       <div className="surface settings-group">
         {link(
           <Landmark />,
-          "銀行・カードの連携",
+          "口座・カードの管理",
           "/financial",
-          "利用できる方法を選ぶ",
+          "残高の手入力・カード明細の取り込み",
         )}
         {link(
           <FileSpreadsheet />,
@@ -520,7 +516,7 @@ export function Settings() {
           {panel === "delete" && (
             <>
               <p className="notice">
-                支出・収入・予定・家計設定など、この端末のデータを削除します。削除後は元に戻せません。暗号化保管庫とパスフレーズは維持します。金融サービス側の認可も取り消す場合は、先に「銀行・カードの連携」で解除してください。
+                支出・収入・予定・家計設定など、この端末のデータを削除します。削除後は元に戻せません。暗号化保管庫とパスフレーズは維持します。
               </p>
               <button
                 className="button button-secondary full"
@@ -565,7 +561,7 @@ export function Settings() {
               </p>
               <h3>端末内で暗号化して保存</h3>
               <p>
-                家計記録・レシート・連携の認証情報は暗号化したIndexedDBに保存します。本人が金融連携を許可した場合だけ、Moneytreeの公式APIで口座・残高・明細を取得します。レシートの外部送信、広告、アクセス解析、家計データの端末間自動同期はありません。
+                家計記録・残高・取り込んだ明細は、この端末で暗号化して保存します。銀行やカードへの自動接続は行いません。レシートの外部送信、広告、アクセス解析、家計データの端末間自動同期はありません。
               </p>
               <h3>バックアップについて</h3>
               <p>

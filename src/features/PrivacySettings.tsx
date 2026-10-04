@@ -25,9 +25,7 @@ export function PrivacySettings() {
         <ShieldCheck size={28} aria-hidden="true" />
         <div>
           <h2>この端末で暗号化して保存</h2>
-          <p className="hint">
-            家計記録・レシート・連携の認証情報を保護します。
-          </p>
+          <p className="hint">家計記録・残高・取り込んだ明細を保護します。</p>
         </div>
       </section>
       <section className="surface">
@@ -36,9 +34,7 @@ export function PrivacySettings() {
           <li>広告やアクセス解析はありません。</li>
           <li>家計データを外部AIに送りません。</li>
           <li>レシートの文字は端末で読み取ります。</li>
-          <li>
-            金融連携を許可した場合だけ、連携サービスから残高・明細を取得します。
-          </li>
+          <li>銀行やカードへ自動接続せず、手入力とCSVで管理します。</li>
         </ul>
         <p className="hint">
           機種変更やブラウザデータの削除前には、バックアップを作成してください。

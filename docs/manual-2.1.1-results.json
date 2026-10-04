@@ -1,0 +1,163 @@
+{
+  "version": "2.1.1",
+  "unitTests": {
+    "files": 17,
+    "passed": 233,
+    "failed": 0,
+    "durationSeconds": 29.33
+  },
+  "environment": {
+    "node": "24.21.0",
+    "timeZone": "UTC",
+    "browser": "Chrome headless"
+  },
+  "build": {
+    "passed": true,
+    "strictTypeScript": true,
+    "pwa": true,
+    "projectBase": "/pace/"
+  },
+  "publicDeploymentPerformed": false,
+  "realFinancialConnectionVerified": false,
+  "realIOSAndGalaxyDevicesVerified": false,
+  "scope": "Fictional fixtures in isolated browser contexts; no real user records or credentials.",
+  "settingsCheckCount": 9,
+  "manualOnlyRuntime": {
+    "manualOnly": true,
+    "productionBundleVersionVerified": "2.1.1",
+    "bankProviderEndpointsAbsentFromProductionBundle": true,
+    "bankAuthorizationAndSyncEntryAbsentFromProductionBundle": true,
+    "bankRequestsObservedInCurrentBrowserQA": 0,
+    "formerConfiguredEnvironmentIgnored": true,
+    "existingFinancialRecordsAndCredentialsPreserved": true,
+    "dormantAdapterSourceRetainedForFormatCompatibility": true,
+    "builtAssetSha256": {
+      "Analytics-DYut07cr.js": "66bb834c7aff6acb614d6e1ad250ced12a3c38067fa254ce12f253cf5d8e715d",
+      "exceljs.min-C1j2HQXe.js": "d5732b281b849c5072958ce1c2d8c1ef0af148edf1f3c75e0aad7cda1dcb062e",
+      "index-h5sFiy_q.js": "3782b4633cfd62a36b797e7da1aed2c2bab73ab0db043741b82834e13d65dcb0",
+      "rolldown-runtime-C0FnF6B9.js": "e0a79ad36c6ca1ffbc796c80aa5661803a9d1bc684e29d1587f48b4ba9a82714",
+      "src-SuYvKHvm.js": "16966625e6c2b09901e095c370e72aef9b87edc95c67502c7e0e1135d5646a2c",
+      "workbox-window.prod.es5-Bd17z0YL.js": "17bcc17d60dc78f927834b880c39649b03af46fd1f5cdbb8c42c5ae2b515dce9"
+    }
+  },
+  "settings": {
+    "passed": true,
+    "checks": [
+      "Separate settings links reach manual account/card management, notifications, salary period and privacy",
+      "Budget period and expected payday remain independently editable and saved",
+      "Manual account management opens a usable balance form without bank authorization or changes to the user's budget period",
+      "The CSV shortcut adds the first card and resumes file selection, preview and an actual encrypted expense import",
+      "Repeated CSV import leaves duplicate rows unselected and cannot silently duplicate recorded spending",
+      "Reminder setup creates one generic daily calendar file during the submit gesture without financial data",
+      "Privacy actions open the correct settings sheets and closing removes the panel URL",
+      "Separated settings, account editor and CSV importer fit 375/390px in both light and dark modes",
+      "Old OAuth parameters are discarded before unlock; formal-looking configuration and preserved stale credentials cannot start bank requests or create errors"
+    ],
+    "errors": [],
+    "overflows": [],
+    "foreignRequests": [],
+    "bankRequests": [],
+    "fictionalProfileOnly": true,
+    "automaticBankIntegration": false,
+    "ignoredConfiguredBankEnvironment": true,
+    "legacyFinancialDataPreserved": true,
+    "screenshots": "screenshots/settings-*"
+  },
+  "legacyMigration": {
+    "previous": "1.3.0",
+    "current": "2.1.1",
+    "projectBase": "/pace/",
+    "legacyPinVerifiedBeforeMigration": true,
+    "allLegacyTablesEqualAfterIndependentDecryption": true,
+    "plaintextAbsent": true,
+    "pinConfigurationPreserved": true,
+    "draftPreserved": true,
+    "offlineVaultAndPinUnlock": true,
+    "encryptedAppUpdatePreservesData": true,
+    "updateGuardWhileEditing": true,
+    "externalRequests": 0,
+    "pageErrors": 0
+  },
+  "privacy": {
+    "generatedAt": "2026-10-04T03:27:15.714Z",
+    "passed": true,
+    "checks": [
+      {
+        "name": "Runtime source excludes plaintext browser storage, console output and client secrets",
+        "passed": true,
+        "sourceFiles": 61,
+        "publicMetadataStorage": [
+          "src/domain/security.ts"
+        ],
+        "networkCallSites": [
+          "src/providers/moneytree/index.ts"
+        ]
+      },
+      {
+        "name": "Moneytree API restricts token destination and disables browser response caching",
+        "passed": true
+      },
+      {
+        "name": "Service Worker caches static app/OCR assets only; receipt image saving is explicit and OCR remains local",
+        "passed": true
+      },
+      {
+        "name": "Atomic legacy migration decrypts every seeded financial record and draft unchanged",
+        "passed": true
+      },
+      {
+        "name": "Native IndexedDB inspection: every non-metadata store is encrypted; every persisted index is blinded",
+        "passed": true,
+        "tableCounts": {
+          "expenses": 1,
+          "incomes": 1,
+          "cards": 1,
+          "cardPayments": 1,
+          "debts": 1,
+          "repayments": 1,
+          "recurringExpenses": 1,
+          "recurringOccurrences": 1,
+          "savingsGoals": 1,
+          "savingsContributions": 1,
+          "budgets": 1,
+          "settings": 1,
+          "merchantRules": 1,
+          "categories": 11,
+          "balanceAdjustments": 1,
+          "dailyCheckIns": 1,
+          "favorites": 1,
+          "drafts": 1,
+          "accounts": 2,
+          "transfers": 1,
+          "financialConnections": 1,
+          "externalTransactions": 1,
+          "syncStates": 1,
+          "receipts": 1,
+          "salaryRules": 1,
+          "financialAudits": 1,
+          "accountAdjustments": 1,
+          "providerCredentials": 1,
+          "vaultMeta": 1
+        }
+      },
+      {
+        "name": "Fresh IVs, locked-tab rejection, key disposal and wrong-passphrase preservation",
+        "passed": true
+      },
+      {
+        "name": "Schema 1 compatibility, schema 2 round trip and encrypted export; provider credentials excluded",
+        "passed": true
+      },
+      {
+        "name": "Injected migration failure leaves all legacy records intact and the vault disabled",
+        "passed": true
+      },
+      {
+        "name": "Mock/manual and unconfigured Moneytree adapters perform zero network requests or credential writes",
+        "passed": true,
+        "networkRequests": 0
+      }
+    ],
+    "scope": "Runtime source review and disposable fake IndexedDB with fictional fixtures; not a penetration test or device-storage recovery guarantee."
+  }
+}
