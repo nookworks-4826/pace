@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   ArrowRightLeft,
@@ -9,6 +9,7 @@ import {
   CreditCard,
   Pencil,
   Undo2,
+  Settings2,
 } from "lucide-react";
 import { usePace } from "../app/context";
 import {
@@ -96,6 +97,7 @@ function AccountEditor({
             automationLevel: "manual",
             updatedAt: now,
           };
+          await enableAccountManagement();
           await db.transaction(
             "rw",
             db.accounts,
@@ -423,7 +425,19 @@ export function TransferEditor({
 }
 export function Money() {
   const { data, finance, today, run } = usePace();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [edit, setEdit] = useState<Account | true | null>(null);
+  useEffect(() => {
+    if (searchParams.get("add") === "account") setEdit(true);
+  }, [searchParams]);
+  const closeAccountEditor = () => {
+    setEdit(null);
+    if (searchParams.has("add")) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("add");
+      setSearchParams(next, { replace: true });
+    }
+  };
   const [preset, setPreset] = useState<
     (typeof accountPresets)[number] | undefined
   >();
@@ -456,9 +470,9 @@ export function Money() {
         <Link
           className="icon-button"
           to="/financial"
-          aria-label="金融連携とプライバシー"
+          aria-label="銀行・カードの連携"
         >
-          ⚙
+          <Settings2 />
         </Link>
       </header>
       {!enabled ? (
@@ -597,7 +611,7 @@ export function Money() {
             振替・チャージ・ATM
           </button>
           <Link className="settings-row surface" to="/financial">
-            <b>金融連携・通知・プライバシー</b>
+            <b>銀行・カードの連携</b>
             <span>→</span>
           </Link>
           <FinancialInbox />
@@ -669,7 +683,7 @@ export function Money() {
         <AccountEditor
           account={edit === true ? undefined : edit}
           preset={preset}
-          onClose={() => setEdit(null)}
+          onClose={closeAccountEditor}
         />
       )}{" "}
       {transfer && <TransferEditor onClose={() => setTransfer(false)} />}

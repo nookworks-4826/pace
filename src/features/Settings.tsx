@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { saveAs } from "file-saver";
 import {
   Bookmark,
+  Bell,
   CalendarClock,
   CalendarDays,
   ChevronRight,
@@ -44,8 +45,21 @@ import { SecuritySettings } from "./Security";
 
 export function Settings() {
   const { data, today, run, toast, appUpdate } = usePace();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [editor, setEditor] = useState<Editor | null>(null);
   const [panel, setPanel] = useState("");
+  useEffect(() => {
+    const requested = searchParams.get("panel");
+    if (requested === "security" || requested === "data") setPanel(requested);
+  }, [searchParams]);
+  const closePanel = () => {
+    setPanel("");
+    if (searchParams.has("panel")) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("panel");
+      setSearchParams(next, { replace: true });
+    }
+  };
   const [ready, setReady] = useState<{ blob: Blob; name: string } | null>(null);
   const [restoring, setRestoring] = useState<AppData | null>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -85,10 +99,13 @@ export function Settings() {
       <ChevronRight size={17} />
     </button>
   );
-  const link = (icon: ReactNode, label: string, url: string) => (
+  const link = (icon: ReactNode, label: string, url: string, note?: string) => (
     <Link className="settings-row" to={url}>
       <span className="settings-icon">{icon}</span>
-      <b>{label}</b>
+      <span>
+        <b>{label}</b>
+        {note && <small>{note}</small>}
+      </span>
       <ChevronRight size={17} />
     </Link>
   );
@@ -111,10 +128,9 @@ export function Settings() {
           </p>
         </div>
       </div>
-      <h2 className="settings-label">お金の設定</h2>
+      <h2 className="settings-label">お金の管理</h2>
       <div className="surface settings-group">
         {link(<Wallet />, "銀行・現金・電子マネー", "/money")}
-        {link(<ShieldCheck />, "金融連携・通知・プライバシー", "/financial")}
         {row(<Wallet />, "残高を合わせる", () =>
           setEditor({ mode: "balance" }),
         )}
@@ -123,18 +139,54 @@ export function Settings() {
         {link(<Target />, "貯金目標", "/manage/savings")}
         {link(<CalendarClock />, "固定費・サブスク", "/manage/recurring")}
         {link(<Receipt />, "収入", "/manage/incomes")}
-        {row(<CalendarDays />, "給料日の予定", () =>
-          setEditor({ mode: "salary" }),
+      </div>
+      <h2 className="settings-label">予定と予算</h2>
+      <div className="surface settings-group">
+        {link(
+          <CalendarDays />,
+          "給料日と予算の期間",
+          "/salary",
+          "給料日・毎月の区切り",
         )}
-        {row(<Target />, "月の予算", () => setEditor({ mode: "budget" }))}
+        {row(<Target />, "予算の金額", () => setEditor({ mode: "budget" }))}
         {link(<CalendarDays />, "お金のタイムライン", "/timeline")}
       </div>
-      <h2 className="settings-label">入力と表示</h2>
+      <h2 className="settings-label">連携と取り込み</h2>
+      <div className="surface settings-group">
+        {link(
+          <Landmark />,
+          "銀行・カードの連携",
+          "/financial",
+          "利用できる方法を選ぶ",
+        )}
+        {link(
+          <FileSpreadsheet />,
+          "カード明細を取り込む",
+          "/manage/cards?import=1",
+          "CSVファイルから支出を記録",
+        )}
+      </div>
+      <h2 className="settings-label">アプリの設定</h2>
+      <div className="surface settings-group">
+        {link(
+          <Bell />,
+          "通知とリマインダー",
+          "/notifications",
+          "通知の種類・時刻",
+        )}
+        {row(<Palette />, "テーマと表示", () => setPanel("theme"))}
+        {row(<Fingerprint />, "アプリロック", () => setPanel("security"))}
+        {link(
+          <ShieldCheck />,
+          "プライバシー",
+          "/privacy",
+          "保存先・送信先・暗号化",
+        )}
+      </div>
+      <h2 className="settings-label">入力の補助</h2>
       <div className="surface settings-group">
         {row(<Tags />, "カテゴリー", () => setPanel("categories"))}
         {row(<Bookmark />, "お気に入り", () => setPanel("favorites"))}
-        {row(<Palette />, "テーマと表示", () => setPanel("theme"))}
-        {row(<Fingerprint />, "アプリロック", () => setPanel("security"))}
         {row(
           <HelpCircle />,
           "初回ヒントをもう一度見る",
@@ -220,7 +272,7 @@ export function Settings() {
               } as Record<string, string>
             )[panel] ?? panel
           }
-          onClose={() => setPanel("")}
+          onClose={closePanel}
         >
           {panel === "theme" && (
             <>
@@ -468,7 +520,7 @@ export function Settings() {
           {panel === "delete" && (
             <>
               <p className="notice">
-                支出・収入・予定・家計設定など、この端末のデータを削除します。削除後は元に戻せません。暗号化保管庫とパスフレーズは維持します。金融サービス側の認可も取り消す場合は、先に「連携とプライバシー」で解除してください。
+                支出・収入・予定・家計設定など、この端末のデータを削除します。削除後は元に戻せません。暗号化保管庫とパスフレーズは維持します。金融サービス側の認可も取り消す場合は、先に「銀行・カードの連携」で解除してください。
               </p>
               <button
                 className="button button-secondary full"
