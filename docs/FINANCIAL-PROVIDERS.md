@@ -1,5 +1,7 @@
 # 金融データ連携の実装と利用条件
 
+> 2026-10-04、Pace 2.1.1で銀行の有料自動連携を採用しない方針に変更しました。接続ボタン、起動時の同期処理、公開ビルドのMoneytree設定を外しています。残高登録・カードCSV取り込み・レシート読み取りを利用します。以下は2.0で検討・試作した連携の技術記録で、現在のアプリを有効化する手順ではありません。
+
 確認日: 2026-10-03。対応候補の掲載は、Paceが利用者の口座と接続済みであることを意味しません。契約・Public Client登録・本番の動作確認を終えるまで、自動取得は利用可能と表示しません。
 
 ## 連携の構成
@@ -29,10 +31,10 @@ VITE_MONEYTREE_BROWSER_ACCESS_CONFIRMED=false
 
 公式エンドポイントは以下に固定します。応答に任意のresource serverが含まれても、無関係なhostへトークンを送信しません。
 
-| 用途 | staging | production |
-| --- | --- | --- |
-| 認可・トークン | `https://myaccount-staging.getmoneytree.com` | `https://myaccount.getmoneytree.com` |
-| 日本のデータAPI | `https://jp-api-staging.getmoneytree.com` | `https://jp-api.getmoneytree.com` |
+| 用途            | staging                                      | production                           |
+| --------------- | -------------------------------------------- | ------------------------------------ |
+| 認可・トークン  | `https://myaccount-staging.getmoneytree.com` | `https://myaccount.getmoneytree.com` |
+| 日本のデータAPI | `https://jp-api-staging.getmoneytree.com`    | `https://jp-api.getmoneytree.com`    |
 
 ## 認証と保存
 
@@ -62,13 +64,13 @@ OAuth Authorization Code + PKCE S256を使用します。state、verifierは毎�
 
 公式の金融機関一覧の公開データで下記の候補を確認しました。実際の連携可否は、契約、対象の商品、利用者の認証、提供元の最新ステータスによります。Paceは取得した一覧のstatus/status_reasonを優先します。[Moneytreeの金融機関ディレクトリ](https://institutions.moneytree.jp/)。
 
-| 候補 | entity key | 確認結果 |
-| --- | --- | --- |
-| 横浜銀行 | `yokohama_bank` | active |
-| 三菱UFJ銀行 | `mufg_bank` | active |
-| 三井住友カード | `smbc_card` | active |
-| MUFGカード系 | `mufg_card` / `mufg_visa_card` | active。カードの商品名を確認して選択 |
-| モバイルSuica | `mobile_suica` | active |
+| 候補           | entity key                     | 確認結果                             |
+| -------------- | ------------------------------ | ------------------------------------ |
+| 横浜銀行       | `yokohama_bank`                | active                               |
+| 三菱UFJ銀行    | `mufg_bank`                    | active                               |
+| 三井住友カード | `smbc_card`                    | active                               |
+| MUFGカード系   | `mufg_card` / `mufg_visa_card` | active。カードの商品名を確認して選択 |
+| モバイルSuica  | `mobile_suica`                 | active                               |
 
 Apple Payは決済の経路です。独立した口座残高を作らず、元のカード/Suicaの明細を使います。
 
