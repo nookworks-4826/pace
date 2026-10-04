@@ -228,7 +228,7 @@ export interface AppData {
   favorites: Favorite[];
 }
 export const APP_NAME = "Pace";
-export const APP_VERSION = "2.0.0";
+export const APP_VERSION = "2.1.0";
 export const SCHEMA_VERSION = 2;
 export const paymentLabels: Record<PaymentMethod, string> = {
   cash: "現金",
