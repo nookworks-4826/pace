@@ -1,4 +1,12 @@
 export type ID = string;
+import type { ExpenseInbox, PracticalSettings } from "./practical.ts";
+export * from "./practical.ts";
+import type {
+  AppearanceSettings,
+  NotificationCenterConfig,
+  PersonalizationSettings,
+} from "./experience.ts";
+export * from "./experience.ts";
 import type {
   Account,
   Transfer,
@@ -30,6 +38,10 @@ export interface Category {
   archived?: boolean;
 }
 export interface Expense extends Stamped, ExternalMetadata {
+  reviewed?: boolean;
+  ocrNeedsReview?: boolean;
+  paymentNeedsReview?: boolean;
+  inputOrigin?: "manual" | "receipt";
   externalMergedFromManual?: boolean;
   sourceAccountId?: ID;
   paymentChannel?: PaymentChannel;
@@ -171,6 +183,7 @@ export interface Favorite {
   id: ID;
   name: string;
   amount: number;
+  memo?: string;
   merchant: string;
   categoryId: ID;
   subcategoryId: ID;
@@ -183,6 +196,10 @@ export interface SalarySchedule {
   variableIncome: boolean;
 }
 export interface AppSettings {
+  practical?: PracticalSettings;
+  personalization?: PersonalizationSettings;
+  notificationCenter?: NotificationCenterConfig;
+  appearance?: AppearanceSettings;
   budgetCycle?: BudgetCycleConfig;
   financialAutomationEnabled?: boolean;
   reminder?: ReminderSettings;
@@ -190,7 +207,8 @@ export interface AppSettings {
   id: "main";
   openingLiquidBalance: number | null;
   salarySchedule: SalarySchedule | null;
-  theme: "default" | "midnight" | "forest" | "mono";
+  theme:
+    "default" | "softWhite" | "glassLight" | "midnight" | "forest" | "mono";
   colorMode: "system" | "light" | "dark";
   onboardingCompleted: boolean;
   setupReviewed: string[];
@@ -200,6 +218,7 @@ export interface AppSettings {
   lockAfterSeconds: 0 | 60 | 300 | 900;
 }
 export interface AppData {
+  expenseInbox?: ExpenseInbox[];
   accounts?: Account[];
   transfers?: Transfer[];
   financialConnections?: FinancialConnection[];
@@ -228,8 +247,8 @@ export interface AppData {
   favorites: Favorite[];
 }
 export const APP_NAME = "Pace";
-export const APP_VERSION = "2.1.1";
-export const SCHEMA_VERSION = 2;
+export const APP_VERSION = "2.2.1";
+export const SCHEMA_VERSION = 4;
 export const paymentLabels: Record<PaymentMethod, string> = {
   cash: "現金",
   debit: "デビット",

@@ -7,6 +7,9 @@ export type BalanceEffect = "snapshot" | "ledger";
 export type PaymentChannel = "direct" | "applePay" | "other";
 export type AutomationLevel = "automatic" | "semi" | "manual";
 export interface Account extends Stamped {
+  lastVerifiedAt?: string;
+  archivedAt?: string;
+  verificationDays?: import("./practical").VerificationDays;
   name: string;
   kind: AccountKind;
   institutionName: string;

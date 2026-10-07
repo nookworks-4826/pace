@@ -109,9 +109,17 @@ async function auditSources() {
   assert.match(ocr, /workerBlobURL:\s*false/);
   assert.match(ocr, /const base = new URL/);
   assert.match(ocr, /document\.baseURI/);
-  assert.match(ocr, /if\s*\(saveImage\s*&&\s*file\)/);
+  assert.match(ocr, /if\s*\(saveImage\s*&&\s*cropped/);
   assert.match(ocr, /setSaveImage\(false\)/);
   assert.doesNotMatch(ocr, /https?:\/\/|\bfetch\s*\(/);
+  assert.match(ocr, /rectifyReceipt\(canvasRaster\(source\.current/);
+  assert.match(ocr, /!confirmed\s*\|\|\s*!validQuad/);
+  assert.match(ocr, /import\(['"]tesseract\.js['"]\)/);
+  assert.match(ocr, /20000/);
+  const image = await contents("src/domain/receiptImage.ts");
+  assert.doesNotMatch(image, /https?:\/\/|\bfetch\s*\(|\bconsole\s*\./);
+  const reminders = await contents("src/domain/notificationCenter.ts");
+  assert.match(reminders, /privateNotificationMessage/);
   record(
     "Service Worker caches static app/OCR assets only; receipt image saving is explicit and OCR remains local",
   );
@@ -160,6 +168,11 @@ function fixture(defaultSettings, defaultCategories) {
         openingLiquidBalance: 50000,
         lastSeenMonth: "2026-10",
         financialAutomationEnabled: true,
+        personalization: {
+          enabled: true,
+          pinnedCards: ["balances"],
+          featureUses: { "PRIVATE-AUDIT-FICTIONAL-LOCAL-USAGE": 3 },
+        },
         salarySchedule: {
           payday: 10,
           expectedAmount: 210000,
@@ -190,6 +203,7 @@ function fixture(defaultSettings, defaultCategories) {
         receiptId: "receipt",
       },
     ],
+    expenseInbox: [{ id: "expense", expenseId: "expense", reasons: ["ocr"] }],
     incomes: [
       {
         ...stamp,
@@ -668,15 +682,18 @@ async function auditDisposableStorage() {
       "salaryRules",
       "financialAudits",
       "accountAdjustments",
+      "expenseInbox",
     ])
       delete legacy[key];
     delete legacy.settings.financialAutomationEnabled;
     const legacyEnvelope = JSON.parse(backup.createBackup(legacy));
-    legacyEnvelope.schemaVersion = 1;
-    legacyEnvelope.metadata.schemaVersion = 1;
-    await backup.parseBackup(JSON.stringify(legacyEnvelope));
+    for (const schemaVersion of [1, 2, 3]) {
+      legacyEnvelope.schemaVersion = schemaVersion;
+      legacyEnvelope.metadata.schemaVersion = schemaVersion;
+      await backup.parseBackup(JSON.stringify(legacyEnvelope));
+    }
     record(
-      "Schema 1 compatibility, schema 2 round trip and encrypted export; provider credentials excluded",
+      "Schema 1/2/3 compatibility, schema 4 round trip and encrypted export; provider credentials excluded",
     );
 
     const failing = makeDatabase();

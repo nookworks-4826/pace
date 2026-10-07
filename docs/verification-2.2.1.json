@@ -1,0 +1,273 @@
+{
+  "version": "2.2.1",
+  "generatedAt": "2026-10-07T09:40:34.969607+00:00",
+  "deployed": false,
+  "realIPhoneVerified": false,
+  "fictionalFixturesOnly": true,
+  "unit": {
+    "command": "npm test -- --maxWorkers=2",
+    "passed": true,
+    "files": 19,
+    "tests": 307
+  },
+  "security": {
+    "command": "npm run test:security -- --maxWorkers=1",
+    "passed": true,
+    "files": 4,
+    "tests": 73,
+    "includedInUnitCount": true
+  },
+  "build": {
+    "command": "npm run build",
+    "passed": true,
+    "typecheck": true,
+    "pwaStaticEntries": 24,
+    "mainJavaScriptKB": 824.81,
+    "mainJavaScriptGzipKB": 250.26
+  },
+  "browserAndPrivacyEvidence": {
+    "experience": {
+      "passed": true,
+      "checks": [
+        {
+          "name": "Amount → explicit account → save with 7 dynamic accounts and recent ranking",
+          "passed": true
+        },
+        {
+          "name": "Undo remains available for the quick expense",
+          "passed": true
+        },
+        {
+          "name": "Apple Pay retains its real card account and clears when switching to cash",
+          "passed": true
+        },
+        {
+          "name": "Bulk balance verification with unchanged values needs no re-entry",
+          "passed": true
+        },
+        {
+          "name": "Notification rules save with generic OS preview and default amount OFF",
+          "passed": true
+        },
+        {
+          "name": "Layout 375px, all 6 themes in light/dark",
+          "passed": true
+        },
+        {
+          "name": "Layout 390px, all 6 themes in light/dark",
+          "passed": true
+        },
+        {
+          "name": "Layout 430px, all 6 themes in light/dark",
+          "passed": true
+        },
+        {
+          "name": "Layout 820px, all 6 themes in light/dark",
+          "passed": true
+        },
+        {
+          "name": "All 8 accents retain at least 4.5:1 text/primary/hero contrast in light/dark",
+          "passed": true
+        },
+        {
+          "name": "Camera has a receipt guide; choosing a photo remains available without hardware",
+          "passed": true
+        },
+        {
+          "name": "Oversized compressed image is rejected before allocating decoded pixels",
+          "passed": true
+        },
+        {
+          "name": "Real on-device OCR excludes fictional background total, requires crop + review, saves nothing automatically",
+          "passed": true,
+          "elapsedMs": 1936
+        },
+        {
+          "name": "One confirmation records reviewed OCR without storing an image by default",
+          "passed": true
+        },
+        {
+          "name": "OCR unavailable safely falls back to editable fields without saving",
+          "passed": true
+        },
+        {
+          "name": "OCR cancellation clears its worker and keeps records intact",
+          "passed": true
+        },
+        {
+          "name": "Pinned home card retains its position after local ranking changes",
+          "passed": true
+        },
+        {
+          "name": "Personalization OFF keeps account order stable; rules need no AI/GPU",
+          "passed": true
+        },
+        {
+          "name": "Explicit image opt-in stores only the cropped JPEG encrypted; normal snapshots exclude images",
+          "passed": true
+        },
+        {
+          "name": "Analysis links filter history in memory, without financial query parameters",
+          "passed": true
+        },
+        {
+          "name": "Negative availability and 12-digit expenses with long merchant names remain readable",
+          "passed": true
+        },
+        {
+          "name": "Empty history has a clear state and no layout overflow",
+          "passed": true
+        },
+        {
+          "name": "1,000 fictional records keep the initial history list bounded at 60 rows",
+          "passed": true
+        }
+      ],
+      "externalRequests": 0,
+      "pageErrors": []
+    },
+    "practical": {
+      "passed": true,
+      "checks": [
+        "One-time upgrade welcome can be dismissed without forcing backup",
+        "Previous expense copies safe fields only; explicit save and encrypted Undo",
+        "Favorite with optional amount reuses its bank source and memo",
+        "Amount-only input is accounted for immediately and reviewed in Inbox",
+        "Balance drift offers four explicit choices; defer does not alter the ledger",
+        "Income drift opens confirmation and does not save on choosing the option",
+        "Four OCR exits remain obvious; manual handoff preserves amount without saving",
+        "Archive retains account and finances while removing entry candidates, then restores",
+        "Five configurable home actions stay within mobile width",
+        "Backup health verifies decryptability and does not claim a saved OS file",
+        "Privacy center reflects real receipt count and backup status",
+        "Invalid references stop startup, preserve data and block database writes"
+      ],
+      "externalRequests": 0,
+      "pageErrors": []
+    },
+    "preservation": {
+      "passed": true,
+      "previous": "2.2.0",
+      "current": "2.2.1",
+      "encryptedTablesPreserved": [
+        "accountAdjustments",
+        "accounts",
+        "balanceAdjustments",
+        "budgets",
+        "cardPayments",
+        "cards",
+        "categories",
+        "dailyCheckIns",
+        "debts",
+        "drafts",
+        "expenses",
+        "externalTransactions",
+        "favorites",
+        "financialAudits",
+        "financialConnections",
+        "incomes",
+        "merchantRules",
+        "providerCredentials",
+        "receipts",
+        "recurringExpenses",
+        "recurringOccurrences",
+        "repayments",
+        "salaryRules",
+        "savingsContributions",
+        "savingsGoals",
+        "settings",
+        "syncStates",
+        "transfers"
+      ],
+      "schemaMigrationPreserved": true,
+      "offlineRestartAndWrite": true,
+      "offlineRoutesAndExport": true,
+      "ocrLazy": true,
+      "cachedStaticAssets": 19,
+      "externalRequests": [],
+      "pageErrors": []
+    },
+    "privacy": {
+      "generatedAt": "2026-10-07T09:39:13.524Z",
+      "passed": true,
+      "checks": [
+        {
+          "name": "Runtime source excludes plaintext browser storage, console output and client secrets",
+          "passed": true,
+          "sourceFiles": 84,
+          "publicMetadataStorage": ["src/domain/security.ts"],
+          "networkCallSites": [
+            "src/features/Practical.tsx",
+            "src/providers/moneytree/index.ts"
+          ]
+        },
+        {
+          "name": "Moneytree API restricts token destination and disables browser response caching",
+          "passed": true
+        },
+        {
+          "name": "Service Worker caches static app/OCR assets only; receipt image saving is explicit and OCR remains local",
+          "passed": true
+        },
+        {
+          "name": "Atomic legacy migration decrypts every seeded financial record and draft unchanged",
+          "passed": true
+        },
+        {
+          "name": "Native IndexedDB inspection: every non-metadata store is encrypted; every persisted index is blinded",
+          "passed": true,
+          "tableCounts": {
+            "expenses": 1,
+            "incomes": 1,
+            "cards": 1,
+            "cardPayments": 1,
+            "debts": 1,
+            "repayments": 1,
+            "recurringExpenses": 1,
+            "recurringOccurrences": 1,
+            "savingsGoals": 1,
+            "savingsContributions": 1,
+            "budgets": 1,
+            "settings": 1,
+            "merchantRules": 1,
+            "categories": 11,
+            "balanceAdjustments": 1,
+            "dailyCheckIns": 1,
+            "favorites": 1,
+            "drafts": 1,
+            "accounts": 2,
+            "transfers": 1,
+            "financialConnections": 1,
+            "externalTransactions": 1,
+            "syncStates": 1,
+            "receipts": 1,
+            "salaryRules": 1,
+            "financialAudits": 1,
+            "accountAdjustments": 1,
+            "providerCredentials": 1,
+            "vaultMeta": 1,
+            "expenseInbox": 1
+          }
+        },
+        {
+          "name": "Fresh IVs, locked-tab rejection, key disposal and wrong-passphrase preservation",
+          "passed": true
+        },
+        {
+          "name": "Schema 1/2/3 compatibility, schema 4 round trip and encrypted export; provider credentials excluded",
+          "passed": true
+        },
+        {
+          "name": "Injected migration failure leaves all legacy records intact and the vault disabled",
+          "passed": true
+        },
+        {
+          "name": "Mock/manual and unconfigured Moneytree adapters perform zero network requests or credential writes",
+          "passed": true,
+          "networkRequests": 0
+        }
+      ],
+      "scope": "Runtime source review and disposable fake IndexedDB with fictional fixtures; not a penetration test or device-storage recovery guarantee."
+    }
+  }
+}

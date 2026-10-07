@@ -518,8 +518,10 @@ export function computeFinance(data: AppData, today = todayJST()) {
       : Math.max(0, Math.min(safeToSpend, periodBudgetRemaining ?? Infinity));
   // In salary mode today has one allowance: recorded spending is added back once to recover its opening frame.
   const dailyAllowance =
-    cycle.mode === "calendar"
-      ? calculateDailyAllowance(safeToSpend, monthlyBudgetRemaining, today)
+    safeToSpend !== null && (safeToSpend <= 0 || (periodBudgetRemaining !== null && periodBudgetRemaining <= 0))
+      ? 0
+      : cycle.mode === "calendar"
+      ? calculateDailyAllowance(safeToSpend === null ? null : safeToSpend + todayDiscretionarySpent, monthlyBudgetRemaining === null ? null : monthlyBudgetRemaining + todayDiscretionarySpent, today)
       : safeToSpend === null
         ? null
         : Math.floor(
@@ -539,7 +541,7 @@ export function computeFinance(data: AppData, today = todayJST()) {
       : Math.max(
           0,
           dailyAllowance -
-            (cycle.mode === "salary" ? todayDiscretionarySpent : todaySpent),
+            todayDiscretionarySpent,
         );
   const tomorrowAllowance =
     available === null || cycle.remainingDaysIncludingToday <= 1
@@ -553,7 +555,7 @@ export function computeFinance(data: AppData, today = todayJST()) {
       ? null
       : Math.max(
           0,
-          (cycle.mode === "salary" ? todayDiscretionarySpent : todaySpent) -
+          todayDiscretionarySpent -
             dailyAllowance,
         );
   const accountingWarnings = accountTotals
@@ -649,6 +651,7 @@ export function computeFinance(data: AppData, today = todayJST()) {
     totalAssets: accountTotals ? accountTotals.totalAssets : liquidBalance,
     lastFinancialUpdatedAt: accountTotals?.lastUpdatedAt ?? null,
     financialDataIsStale: accountTotals?.hasStaleData ?? false,
+    balanceConfidence: accountTotals?.unknownAccountIds.length || accountTotals?.unallocatedRecordIds.length ? 'low' as const : accountTotals?.hasStaleData ? 'medium' as const : 'high' as const,
     unknownAccountIds: accountTotals?.unknownAccountIds ?? [],
     unallocatedRecordIds: accountTotals?.unallocatedRecordIds ?? [],
     accountingWarnings,

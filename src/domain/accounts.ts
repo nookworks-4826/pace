@@ -1,3 +1,4 @@
+import { verificationDays } from "./practical";
 import type { Account, AppData, BalanceEffect, Transfer } from "../types";
 import { dateKey, todayJST } from "./dates";
 
@@ -150,10 +151,15 @@ export function getAccountBalances(
     balance: calculateAccountBalance(data, account, today),
     isLiability: isLiability(account),
     isStale:
-      account.balanceSource === "provider" &&
-      Date.parse(now) - Date.parse(account.snapshotRecordedAt) >
-        24 * 60 * 60_000,
-    lastUpdatedAt: account.snapshotRecordedAt,
+      verificationDays(account) !== 0 &&
+      !account.archivedAt &&
+      (!Number.isFinite(
+        Date.parse(account.lastVerifiedAt ?? account.snapshotRecordedAt),
+      ) ||
+        Date.parse(now) -
+          Date.parse(account.lastVerifiedAt ?? account.snapshotRecordedAt) >=
+          verificationDays(account) * 24 * 60 * 60_000),
+    lastUpdatedAt: account.lastVerifiedAt ?? account.snapshotRecordedAt,
   }));
 }
 

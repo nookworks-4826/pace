@@ -29,9 +29,11 @@ const lifecycle = `
   if (!/^[a-f0-9-]{36}$/.test(session) || typeof BroadcastChannel === "undefined") { self.close(); return; }
   const channel = new BroadcastChannel("pace-ocr-" + session);
   const stop = () => { channel.close(); self.close(); };
-  channel.onmessage = (event) => { if (event.data === "cancel") stop(); };
+  let deadline;
+  const renew = () => {clearTimeout(deadline); deadline=setTimeout(stop, 80000);};
+  channel.onmessage = (event) => { if (event.data === "cancel") stop(); else if(event.data === "keepalive") renew(); };
   channel.postMessage("ready");
-  setTimeout(stop, 60000);
+  renew();
 })();
 `;
 await writeFile(resolve(output, "worker.min.js"), lifecycle + workerSource);

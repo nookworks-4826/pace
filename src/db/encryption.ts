@@ -24,6 +24,7 @@ export interface VaultKeys {
 }
 export interface VaultSession {
   keys: VaultKeys | null;
+  readOnly?: boolean;
   migrating: boolean;
   hashes: Map<string, string>;
 }
@@ -337,7 +338,17 @@ export function installVaultMiddleware(
         },
         table(name) {
           const table = down.table(name);
-          if (name === "vaultMeta") return table;
+          if (name === "vaultMeta")
+            return {
+              ...table,
+              mutate(req) {
+                if (session.readOnly)
+                  throw new Error(
+                    "確認が必要なため、書き込みを停止しています。",
+                  );
+                return table.mutate(req);
+              },
+            };
           return {
             ...table,
             get(req) {
@@ -400,6 +411,8 @@ export function installVaultMiddleware(
               });
             },
             mutate(req) {
+              if (session.readOnly)
+                throw new Error("確認が必要なため、書き込みを停止しています。");
               return enabled(req.trans).then((active) => {
                 if (!active) {
                   if (

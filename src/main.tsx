@@ -5,6 +5,7 @@ import { consumeOAuthCallback } from "./providers/moneytree/pkce";
 import "./styles/app.css";
 import "./styles/refresh.css";
 import "./styles/automation.css";
+import "./styles/experience.css";
 // Discard old authorization responses before rendering. Bank connections are not enabled.
 consumeOAuthCallback(location.href, (url) =>
   history.replaceState(null, "", url),

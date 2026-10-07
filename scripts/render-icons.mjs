@@ -15,7 +15,7 @@ try {
   ]) {
     await page.setViewportSize({ width: size, height: size });
     await page.setContent(
-      `<style>html,body{margin:0;width:100%;height:100%;background:#ffdb67}svg{width:100%;height:100%;display:block}</style>${maskable ? svg.replace('rx="112"', 'rx="0"') : svg}`,
+      `<style>html,body{margin:0;width:100%;height:100%;background:#f5f8ff}svg{width:100%;height:100%;display:block}</style>${maskable ? svg.replace('rx="112"', 'rx="0"') : svg}`,
     );
     await page.screenshot({ path: `public/${name}` });
   }

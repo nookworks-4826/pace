@@ -1,3 +1,8 @@
+import { useEffect, useState } from "react";
+import { liveQuery } from "dexie";
+import { usePace } from "../app/context";
+import { db } from "../db";
+import { backupHealthLabel } from "../domain/backupHealth";
 import { Link } from "react-router-dom";
 import {
   ArrowLeft,
@@ -10,6 +15,15 @@ import {
 import { lockVault } from "../domain/vault";
 
 export function PrivacySettings() {
+  const { data } = usePace(),
+    [receipts, setReceipts] = useState<number | null>(null);
+  useEffect(() => {
+    const sub = liveQuery(() => db.receipts.count()).subscribe({
+      next: setReceipts,
+      error: () => setReceipts(null),
+    });
+    return () => sub.unsubscribe();
+  }, []);
   return (
     <div className="page dedicated-settings privacy-settings-page">
       <header className="page-header">
@@ -30,10 +44,30 @@ export function PrivacySettings() {
       </section>
       <section className="surface">
         <h2>保存と送信</h2>
+        <p>
+          保存済みレシート：
+          {receipts === null ? "確認できません" : `${receipts}件`} ·
+          バックアップ：
+          {backupHealthLabel(data.settings.practical?.backupHealth)}
+        </p>
+        <p className="hint">
+          バックアップの確認日時：
+          {data.settings.practical?.backupHealth?.checkedAt
+            ? new Date(
+                data.settings.practical.backupHealth.checkedAt,
+              ).toLocaleString("ja-JP")
+            : "未確認"}
+          。外部AI・外部OCR・金融API・解析・広告は使っていません。
+        </p>
         <ul className="privacy-facts">
           <li>広告やアクセス解析はありません。</li>
           <li>家計データを外部AIに送りません。</li>
-          <li>レシートの文字は端末で読み取ります。</li>
+          <li>
+            レシートの文字は端末で読み取ります。画像保存は毎回選択し、初期状態はオフです。
+          </li>
+          <li>
+            使い方の最適化・通知設定は暗号化して端末に保存します。AIや解析サーバーへの送信はありません。
+          </li>
           <li>銀行やカードへ自動接続せず、手入力とCSVで管理します。</li>
         </ul>
         <p className="hint">

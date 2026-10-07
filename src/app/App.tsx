@@ -34,6 +34,12 @@ import { computeFinance } from "../domain/finance";
 import { todayJST } from "../domain/dates";
 import { getLockConfig } from "../domain/security";
 import { AppContext, usePace } from "./context";
+import { SafeRecovery } from "../features/SafeRecovery";
+import {
+  ExpenseInboxPage,
+  RecentChangesPage,
+  IncomeDraft,
+} from "../features/Practical";
 import { Home } from "../features/Home";
 import { History } from "../features/History";
 import { Settings } from "../features/Settings";
@@ -45,7 +51,7 @@ import { Timeline } from "../features/Timeline";
 import { VaultGate } from "../features/VaultGate";
 import { Money } from "../features/Money";
 import { FinancialSettings } from "../features/FinancialSettings";
-import { NotificationSettings } from "../features/NotificationSettings";
+import { NotificationCenterSettings as NotificationSettings } from "../features/NotificationCenterSettings";
 import { SalarySettings } from "../features/SalarySettings";
 import { PrivacySettings } from "../features/PrivacySettings";
 import { FinancialProviderError } from "../providers/types";
@@ -92,23 +98,32 @@ function ScrollReset() {
   return null;
 }
 function AnalyticsRoute() {
-  const { data } = usePace();
-  const navigate = useNavigate();
+  const { data, openHistory } = usePace();
   return (
     <Analytics
       data={data}
       onViewHistory={(category, month, from, to) =>
-        navigate(
-          `/history?${new URLSearchParams({ ...(category ? { category } : {}), ...(month ? { month } : {}), ...(from ? { from } : {}), ...(to ? { to } : {}) }).toString()}`,
-        )
+        openHistory({ category, month, from, to })
       }
     />
   );
 }
 function Application() {
   const { data, error } = useAppData();
-  useFinancialReminder(data);
+  useFinancialReminder(error ? null : data);
   const [today, setToday] = useState(todayJST());
+  const navigate = useNavigate();
+  const [historyFilters, setHistoryFilters] = useState<
+    import("./context").HistoryFilters
+  >({});
+  const openHistory = (filters: import("./context").HistoryFilters) => {
+    setHistoryFilters(filters);
+    navigate("/history");
+  };
+  const [expenseInput, setExpenseInput] = useState<
+    Partial<Expense> | undefined
+  >();
+  const [receiptStart, setReceiptStart] = useState(false);
   const [expense, setExpense] = useState<Expense | true | null>(null);
   const [notice, setNotice] = useState<{
     message: string;
@@ -151,7 +166,14 @@ function Application() {
     },
     [toast],
   );
-  const openExpense = useCallback((e?: Expense) => setExpense(e ?? true), []);
+  const openExpense = useCallback(
+    (e?: Expense, receipt = false, input?: Partial<Expense>) => {
+      setExpenseInput(input);
+      setReceiptStart(receipt);
+      setExpense(e ?? true);
+    },
+    [],
+  );
   const closeExpense = useCallback(() => setExpense(null), []);
   useEffect(() => {
     const online = () => setOffline(!navigator.onLine);
@@ -210,6 +232,10 @@ function Application() {
     if (!data) return;
     document.documentElement.dataset.theme = data.settings.theme;
     document.documentElement.dataset.mode = data.settings.colorMode;
+    for (const key of ["accent", "background", "cards", "density"])
+      delete document.documentElement.dataset[key];
+    for (const [key, value] of Object.entries(data.settings.appearance ?? {}))
+      document.documentElement.dataset[key] = value;
   }, [data?.settings.theme, data?.settings.colorMode, data]);
   useEffect(() => {
     const viewport = window.visualViewport;
@@ -245,19 +271,7 @@ function Application() {
         }}
       />
     );
-  if (error)
-    return (
-      <div className="fatal-error">
-        <h1>データを開けませんでした</h1>
-        <p>{error}</p>
-        <button
-          className="button button-primary"
-          onClick={() => location.reload()}
-        >
-          再試行
-        </button>
-      </div>
-    );
+  if (error) return <SafeRecovery message={error} />;
   if (!data || !finance)
     return (
       <div className="boot-logo">
@@ -266,7 +280,17 @@ function Application() {
     );
   return (
     <AppContext.Provider
-      value={{ data, finance, today, openExpense, toast, run, appUpdate }}
+      value={{
+        data,
+        finance,
+        today,
+        openExpense,
+        toast,
+        run,
+        appUpdate,
+        historyFilters,
+        openHistory,
+      }}
     >
       {hidden && (
         <div className="privacy-cover">
@@ -312,6 +336,8 @@ function Application() {
           >
             <Routes>
               <Route path="/" element={<Home />} />
+              <Route path="/inbox" element={<ExpenseInboxPage />} />
+              <Route path="/recent-changes" element={<RecentChangesPage />} />
               <Route path="/history" element={<History />} />
               <Route path="/analytics" element={<AnalyticsRoute />} />
               <Route path="/settings" element={<Settings />} />
@@ -352,8 +378,11 @@ function Application() {
           </nav>
         </div>
       )}
+      <IncomeDraft />
       {expense && (
         <ExpenseSheet
+          input={expenseInput}
+          startReceipt={receiptStart}
           expense={expense === true ? undefined : expense}
           onClose={closeExpense}
         />

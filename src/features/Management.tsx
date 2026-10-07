@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { withUndo, undoChange } from "../domain/undo";
 import {
   Link,
   useNavigate,
@@ -106,7 +107,12 @@ export function FinanceEditor({
       ? (entity as RecurringExpense).paymentMethod
       : method;
   const eligibleAccounts = (data.accounts ?? []).filter((account) => {
-    if (!account.isActive) return false;
+    if (
+      !account.isActive ||
+      (account.archivedAt &&
+        account.id !== (entity as Income | RecurringExpense)?.sourceAccountId)
+    )
+      return false;
     if (mode === "cardPayment") return account.kind === "BANK";
     if (mode === "income" || mode === "repayment" || mode === "contribution")
       return account.kind !== "CREDIT_CARD" && account.isSpendable;
@@ -249,7 +255,7 @@ export function FinanceEditor({
       ].includes(mode) &&
       !confirm(`${yen(a)}で記録しますか？`)
     )
-      return;
+      return false;
     switch (mode) {
       case "card": {
         const old = entity as CreditCard | undefined;
@@ -521,13 +527,28 @@ export function FinanceEditor({
         break;
       }
     }
-    onSaved?.();
-    onClose();
-    toast("保存しました");
+    return true;
   }
   return (
     <Sheet title={titles[mode]} onClose={onClose}>
-      <AsyncForm onSubmit={submit}>
+      <AsyncForm
+        onSubmit={async (f) => {
+          if (editor.mode === "balance" || editor.mode === "income") {
+            const undo = await withUndo(
+              editor.mode === "balance" ? "残高を調整" : "収入を記録",
+              () => submit(f),
+            );
+            if (!undo.value) return;
+            onSaved?.();
+            onClose();
+            toast("保存しました", () => undoChange(undo.id));
+          } else if (await submit(f)) {
+            onSaved?.();
+            onClose();
+            toast("保存しました");
+          }
+        }}
+      >
         {mode === "card" && (
           <>
             <Field label="カード名">
@@ -1011,7 +1032,8 @@ export function Management() {
   const { section = "cards" } = useParams();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { data, finance, today, run, toast, openExpense } = usePace();
+  const { data, finance, today, run, toast, openExpense, openHistory } =
+    usePace();
   const [editor, setEditor] = useState<Editor | null>(null);
   const [importing, setImporting] = useState(false);
   const [pendingImport, setPendingImport] = useState(false);
@@ -1360,7 +1382,7 @@ export function Management() {
                   </div>
                   <button
                     className="text-button"
-                    onClick={() => navigate(`/history?card=${card.id}`)}
+                    onClick={() => openHistory({ card: card.id })}
                   >
                     全利用履歴を見る
                   </button>

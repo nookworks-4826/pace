@@ -50,6 +50,29 @@ beforeEach(async () => {
 afterAll(() => db.close());
 
 describe("IndexedDB persistence and atomic mutation", () => {
+  it("does not reuse another device's saved-file confirmation after restoration", async () => {
+    const snapshot = await readAppData();
+    snapshot.settings.practical = {
+      backupHealth: {
+        status: "normal",
+        checkedAt: stamped.createdAt,
+        encrypted: true,
+        schemaVersion: 4,
+        bytes: 100,
+        savedConfirmed: true,
+      },
+    };
+    await saveExpense(expense());
+    snapshot.expenses = [expense()];
+    await restoreAppData(snapshot);
+    const restored = await readAppData();
+    expect(restored.expenses).toEqual(snapshot.expenses);
+    expect(restored.settings.practical?.backupHealth).toMatchObject({
+      status: "review",
+      savedConfirmed: false,
+      encrypted: true,
+    });
+  });
   it("keeps unfinished financial drafts in IndexedDB and clears them on restore", async () => {
     await db.drafts.put({
       id: "expense",

@@ -407,10 +407,11 @@ describe("account snapshots and transfer ledger", () => {
       validateTransfer({ ...move, amount: -1 }, app.accounts!),
     ).toThrow();
   });
-  it("uses 24 actual hours for provider freshness", () => {
+  it("uses 24 actual hours for an explicitly selected one-day verification interval", () => {
     const app = data([
       account("bank", "BANK", 100, {
         balanceSource: "provider",
+        verificationDays: 1,
         snapshotRecordedAt: "2026-10-19T12:00:00+09:00",
       }),
     ]);

@@ -18,7 +18,7 @@ const defaultReminder: ReminderSettings = {
   delivery: "calendar",
 };
 
-export function NotificationSettings() {
+export function NotificationSettings({embedded=false}:{embedded?:boolean} = {}) {
   const { data, today, toast } = usePace();
   const saved = data.settings.reminder ?? defaultReminder;
   const [enabled, setEnabled] = useState(saved.enabled);
@@ -44,8 +44,8 @@ export function NotificationSettings() {
     permission !== "granted";
 
   return (
-    <div className="page dedicated-settings notifications-page">
-      <header className="page-header">
+    <div className={embedded?"notifications-embedded":"page dedicated-settings notifications-page"}>
+      {!embedded&&<header className="page-header">
         <Link className="icon-button" to="/settings" aria-label="設定へ戻る">
           <ArrowLeft />
         </Link>
@@ -53,13 +53,13 @@ export function NotificationSettings() {
           <h1>通知とリマインダー</h1>
           <p className="subtitle">お金を見直す時間を、自分で決める。</p>
         </div>
-      </header>
+      </header>}
       <section className="surface settings-summary">
         <Bell size={26} aria-hidden="true" />
         <div>
           <h2>
             {!saved.enabled
-              ? "リマインダーはオフ"
+              ? "端末への通知はオフ"
               : needsPermission && permission === null
                 ? "この端末では通知を使えません"
                 : needsPermission

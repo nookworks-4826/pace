@@ -1,24 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Bookmark,
-  Check,
-  CreditCard as CardIcon,
-  Sparkles,
-  Wallet,
-} from "lucide-react";
+import { Bookmark, Check, Sparkles, Wallet } from "lucide-react";
 import { usePace } from "../app/context";
 import { AsyncForm, Field, Sheet, stamp, yen } from "../components/UI";
-import { db, deleteExpense, saveExpense } from "../db";
-import {
-  suggestCategory,
-  parseQuickEntry,
-  normalizeMerchant,
-} from "../domain/categorization";
+import { db, saveExpense } from "../db";
+import { parseQuickEntry, normalizeMerchant } from "../domain/categorization";
+import { suggestLocalCategory } from "../domain/localAssistant";
 import { paymentLabels } from "../types";
 import type { Expense, Favorite, PaymentMethod } from "../types";
 import type { PaymentChannel } from "../types";
+import {
+  rankPaymentSources,
+  unusualAmount,
+  payableAccounts,
+} from "../domain/personalization";
+import { recordFeatureUse } from "../domain/experienceActions";
+import { Link } from "react-router-dom";
 import { ReceiptCapture } from "./ReceiptCapture";
 
+import {
+  expenseInput,
+  previousExpense,
+  recentAmountSuggestions,
+} from "../domain/practical";
+import { withUndo, undoChange } from "../domain/undo";
 interface Draft {
   sourceAccountId: string;
   paymentChannel: PaymentChannel;
@@ -33,43 +37,26 @@ interface Draft {
 }
 export function ExpenseSheet({
   expense,
+  input,
   onClose,
+  startReceipt = false,
 }: {
   expense?: Expense;
+  input?: Partial<Expense>;
+  startReceipt?: boolean;
   onClose: () => void;
 }) {
   const { data, today, toast } = usePace();
-  const lastExpense = [...data.expenses].sort((a, b) =>
-    b.createdAt.localeCompare(a.createdAt),
-  )[0];
-  const initialAccount =
-    (data.accounts ?? []).find(
-      (a) => a.isActive && a.id === lastExpense?.sourceAccountId,
-    ) ?? (data.accounts ?? []).find((a) => a.isActive && a.kind === "CASH");
   const blank: Draft = {
-    sourceAccountId: initialAccount?.id ?? "",
+    sourceAccountId: "",
     paymentChannel: "direct",
     amount: "",
     merchant: "",
     date: today,
     categoryId: "uncategorized",
     subcategoryId: "",
-    paymentMethod:
-      data.settings.financialAutomationEnabled && initialAccount
-        ? initialAccount.kind === "CREDIT_CARD"
-          ? "creditCard"
-          : initialAccount.kind === "CASH"
-            ? "cash"
-            : initialAccount.kind === "BANK"
-              ? "bank"
-              : "other"
-        : ([...data.expenses].sort((a, b) =>
-            b.createdAt.localeCompare(a.createdAt),
-          )[0]?.paymentMethod ?? "cash"),
-    creditCardId:
-      initialAccount?.creditCardId ??
-      data.cards.find((c) => c.isActive)?.id ??
-      "",
+    paymentMethod: "cash",
+    creditCardId: "",
     memo: "",
   };
   const [draft, setDraft] = useState<Draft>(() =>
@@ -81,12 +68,18 @@ export function ExpenseSheet({
           sourceAccountId: expense.sourceAccountId ?? "",
           paymentChannel: expense.paymentChannel ?? "direct",
         }
-      : blank,
+      : {
+          ...blank,
+          ...input,
+          amount: input?.amount ? String(input.amount) : "",
+          creditCardId: input?.creditCardId ?? "",
+          sourceAccountId: input?.sourceAccountId ?? "",
+        },
   );
-  const [draftReady, setDraftReady] = useState(Boolean(expense));
+  const [draftReady, setDraftReady] = useState(Boolean(expense || input));
   const interacted = useRef(false);
   useEffect(() => {
-    if (expense) return;
+    if (expense || input) return;
     let cancelled = false;
     void db.drafts
       .get("expense")
@@ -118,13 +111,50 @@ export function ExpenseSheet({
       cancelled = true;
     };
   }, []);
+  const [showAllAccounts, setShowAllAccounts] = useState(false);
+  const sources = useMemo(
+    () =>
+      rankPaymentSources(data, today, expense?.sourceAccountId, draft.merchant),
+    [
+      data.accounts,
+      data.expenses,
+      data.settings.personalization,
+      today,
+      expense?.sourceAccountId,
+      draft.merchant,
+    ],
+  );
+  const accountInput =
+    !!data.settings.financialAutomationEnabled || sources.length > 0;
   const [quick, setQuick] = useState("");
   const [manual, setManual] = useState(Boolean(expense));
   const [favorite, setFavorite] = useState(false);
+  const [savedReceipt, setSavedReceipt] = useState<{
+    mimeType: string;
+    imageBase64: string;
+  } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (expense?.receiptId)
+      void db.receipts
+        .get(expense.receiptId)
+        .then((r) => {
+          if (!cancelled) setSavedReceipt(r ?? null);
+        })
+        .catch(() =>
+          toast("画像を読み込めませんでした。記録は保存されています。"),
+        );
+    return () => {
+      cancelled = true;
+    };
+  }, [expense?.receiptId]);
   const [receiptImage, setReceiptImage] = useState<File | undefined>();
   const [receiptBusy, setReceiptBusy] = useState(false);
+  const [receiptOpen, setReceiptOpen] = useState(startReceipt);
   const receiptBusyRef = useRef(false);
   const savedRef = useRef(false);
+  const receiptNeedsReview = useRef(false);
+  const receiptApplying = useRef(false);
   useEffect(() => {
     if (draftReady && !expense && !savedRef.current)
       void db.drafts
@@ -136,8 +166,8 @@ export function ExpenseSheet({
         );
   }, [draft, draftReady, expense, toast]);
   const suggestion = useMemo(
-    () => suggestCategory(draft.merchant, data.merchantRules, data.categories),
-    [draft.merchant, data.merchantRules, data.categories],
+    () => suggestLocalCategory(draft.merchant, data),
+    [draft.merchant, data.merchantRules, data.categories, data.expenses],
   );
   useEffect(() => {
     if (!manual && draft.merchant) {
@@ -155,44 +185,54 @@ export function ExpenseSheet({
   const selectedCategory = data.categories.find(
     (c) => c.id === draft.categoryId,
   );
-  const recent = Array.from(
-    new Map(
-      [...data.expenses]
-        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-        .filter((e) => e.merchant)
-        .map((e) => [e.merchant, e]),
-    ).values(),
-  ).slice(0, 5);
-  const frequentCategories = data.categories
-    .map((c) => ({
-      ...c,
-      uses: data.expenses.filter((e) => e.categoryId === c.id).length,
-    }))
-    .filter((c) => c.uses > 0 && !c.archived)
-    .sort((a, b) => b.uses - a.uses)
-    .slice(0, 4);
-  const amounts = Array.from(
-    new Set(
-      [...data.expenses]
-        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-        .map((e) => e.amount),
-    ),
-  ).slice(0, 4);
-  function applyFavorite(f: Favorite) {
+  const recent = useMemo(() => {
+    const merchants = new Map<string, Expense>();
+    for (const row of [...data.expenses].sort((a, b) =>
+      b.createdAt.localeCompare(a.createdAt),
+    )) {
+      if (row.merchant && !merchants.has(row.merchant))
+        merchants.set(row.merchant, row);
+      if (merchants.size >= 5) break;
+    }
+    return [...merchants.values()];
+  }, [data.expenses]);
+  const frequentCategories = useMemo(() => {
+    const uses = new Map<string, number>();
+    for (const row of data.expenses)
+      uses.set(row.categoryId, (uses.get(row.categoryId) ?? 0) + 1);
+    return data.categories
+      .map((c) => ({ ...c, uses: uses.get(c.id) ?? 0 }))
+      .filter((c) => c.uses > 0 && !c.archived)
+      .sort((a, b) => b.uses - a.uses)
+      .slice(0, 4);
+  }, [data.expenses, data.categories]);
+  const amounts = useMemo(
+    () =>
+      recentAmountSuggestions(
+        data,
+        draft.merchant,
+        draft.sourceAccountId,
+        today,
+      ),
+    [data.expenses, draft.merchant, draft.sourceAccountId, today],
+  );
+  const previous = useMemo(() => previousExpense(data), [data.expenses]);
+  function applyFavorite(f: Favorite | Expense) {
+    interacted.current = true;
     setManual(true);
-    setDraft((old) => ({
-      ...old,
-      merchant: f.merchant,
-      amount: String(f.amount),
-      categoryId: f.categoryId,
-      subcategoryId: f.subcategoryId,
-      paymentMethod: f.paymentMethod,
-      creditCardId: f.creditCardId ?? old.creditCardId,
-      sourceAccountId: f.sourceAccountId ?? old.sourceAccountId,
-      paymentChannel: f.paymentChannel ?? "direct",
-    }));
+    const values = expenseInput(f);
+    const validSource = payableAccounts(data).some(
+      (a) => a.id === values.sourceAccountId,
+    );
+    setDraft({
+      ...blank,
+      ...values,
+      amount: values.amount ? String(values.amount) : "",
+      sourceAccountId: validSource ? values.sourceAccountId! : "",
+      creditCardId: values.creditCardId ?? "",
+    });
   }
-  async function save() {
+  async function save(draft: Draft, receiptImage: File | undefined) {
     if (receiptBusyRef.current)
       throw new Error("レシートの処理が終わるまでお待ちください。");
     const amount = Number(draft.amount);
@@ -205,10 +245,9 @@ export function ExpenseSheet({
     const source = (data.accounts ?? []).find(
       (a) =>
         a.id === draft.sourceAccountId &&
-        (a.isActive || a.id === expense?.sourceAccountId),
+        ((a.isActive && !a.archivedAt) || a.id === expense?.sourceAccountId),
     );
-    if (data.settings.financialAutomationEnabled && !source)
-      throw new Error("支払元を選んでください。");
+    if (accountInput && !source) throw new Error("支払元を選んでください。");
     if (source?.kind === "CREDIT_CARD" && !source.creditCardId)
       throw new Error("口座の設定で対応するカードを選んでください。");
     const paymentMethod = source
@@ -227,7 +266,17 @@ export function ExpenseSheet({
       throw new Error(
         "カードを選んでください。設定の「カード」から追加できます。",
       );
-    if (amount >= 100000 && !confirm(`${yen(amount)}で登録しますか？`)) return;
+    if (
+      unusualAmount(
+        data.expenses.filter((e) => e.id !== expense?.id),
+        draft.merchant,
+        amount,
+      ) &&
+      !confirm("いつもより大きな金額です。内容を確認して登録しますか？")
+    )
+      return false;
+    if (amount >= 100000 && !confirm(`${yen(amount)}で登録しますか？`))
+      return false;
     const duplicate = data.expenses.find(
       (e) =>
         e.id !== expense?.id &&
@@ -242,10 +291,18 @@ export function ExpenseSheet({
         "同じ店・金額の記録があります。重複の可能性がありますが、登録しますか？",
       )
     )
-      return;
+      return false;
     const row: Expense = {
       ...(expense ?? stamp()),
       amount,
+      reviewed: expense?.reviewed,
+      ocrNeedsReview:
+        receiptNeedsReview.current ||
+        expense?.ocrNeedsReview ||
+        (receiptApplying.current && !draft.merchant.trim()),
+      inputOrigin:
+        expense?.inputOrigin ??
+        (receiptApplying.current ? "receipt" : "manual"),
       date: draft.date,
       merchant: draft.merchant.trim() || "支出",
       description: expense?.description ?? "",
@@ -260,7 +317,10 @@ export function ExpenseSheet({
       isFixedCost: expense?.isFixedCost ?? false,
       recurringOccurrenceId: expense?.recurringOccurrenceId,
       sourceAccountId: source?.id ?? expense?.sourceAccountId,
-      paymentChannel: draft.paymentChannel,
+      paymentChannel:
+        source?.kind === "CASH" || source?.kind === "BANK"
+          ? "direct"
+          : draft.paymentChannel,
       balanceEffect: expense?.externalTransactionId ? "snapshot" : "ledger",
       pendingStatus: expense?.externalTransactionId
         ? expense.pendingStatus
@@ -280,127 +340,108 @@ export function ExpenseSheet({
           reader.readAsDataURL(receiptImage);
         })
       : undefined;
-    await db.transaction(
-      "rw",
-      [
-        db.expenses,
-        db.merchantRules,
-        db.categories,
-        db.cards,
-        db.recurringOccurrences,
-        db.recurringExpenses,
-        db.favorites,
-        db.drafts,
-        db.receipts,
-        db.externalTransactions,
-      ],
-      async () => {
-        if (receiptImage && receiptId && imageBase64) {
-          await db.receipts.add({
-            ...stamp(),
-            id: receiptId,
-            expenseId: row.id,
-            mimeType: receiptImage.type,
-            imageBase64,
-          });
-        }
-        await saveExpense(row);
-        if (favorite)
-          await db.favorites.put({
-            id: crypto.randomUUID(),
-            name: row.merchant,
-            merchant: row.merchant,
-            amount,
-            categoryId: row.categoryId,
-            subcategoryId: row.subcategoryId,
-            paymentMethod: row.paymentMethod,
-            creditCardId: row.creditCardId,
-            sourceAccountId: row.sourceAccountId,
-            paymentChannel: row.paymentChannel,
-          });
-        if (!expense) await db.drafts.delete("expense");
-      },
+    const undo = await withUndo(expense ? "支出を編集" : "支出を追加", () =>
+      db.transaction(
+        "rw",
+        [
+          db.expenses,
+          db.merchantRules,
+          db.categories,
+          db.cards,
+          db.recurringOccurrences,
+          db.recurringExpenses,
+          db.favorites,
+          db.drafts,
+          db.receipts,
+          db.externalTransactions,
+          db.expenseInbox,
+        ],
+        async () => {
+          if (receiptImage && receiptId && imageBase64) {
+            await db.receipts.add({
+              ...stamp(),
+              id: receiptId,
+              expenseId: row.id,
+              mimeType: receiptImage.type,
+              imageBase64,
+            });
+          }
+          await saveExpense(row);
+          if (favorite)
+            await db.favorites.put({
+              id: crypto.randomUUID(),
+              name: row.merchant,
+              memo: row.memo,
+              merchant: row.merchant,
+              amount,
+              categoryId: row.categoryId,
+              subcategoryId: row.subcategoryId,
+              paymentMethod: row.paymentMethod,
+              creditCardId: row.creditCardId,
+              sourceAccountId: row.sourceAccountId,
+              paymentChannel: row.paymentChannel,
+            });
+          if (!expense) await db.drafts.delete("expense");
+        },
+      ),
     );
+    void recordFeatureUse(
+      receiptApplying.current ? "receipt" : "expense",
+    ).catch(() => {});
     savedRef.current = true;
     onClose();
     toast(
       row.paymentMethod === "creditCard"
         ? `記録しました · カード未払いに${yen(amount)}追加`
         : "記録しました",
-      async () => {
-        if (expense) await saveExpense(expense);
-        else await deleteExpense(row.id);
-      },
+      () => undoChange(undo.id),
     );
+    return true;
   }
   return (
     <Sheet title={expense ? "支出を編集" : "支出を記録"} onClose={onClose}>
       <AsyncForm
-        onSubmit={save}
-        disabled={receiptBusy}
+        onSubmit={async () => {
+          await save(draft, receiptImage);
+        }}
+        disabled={receiptBusy || receiptOpen}
+        className={receiptOpen ? "receipt-mode" : ""}
         label={expense ? "変更を保存" : "記録する"}
       >
-        {!expense && (
-          <ReceiptCapture
-            onBusyChange={(busy) => {
-              receiptBusyRef.current = busy;
-              setReceiptBusy(busy);
-            }}
-            onApply={(candidate) => {
-              const possible = (data.accounts ?? []).filter(
-                (a) =>
-                  a.isActive &&
-                  (candidate.paymentMethod === "cash"
-                    ? a.kind === "CASH"
-                    : candidate.paymentMethod === "creditCard"
-                      ? a.kind === "CREDIT_CARD"
-                      : candidate.paymentMethod === "other"
-                        ? a.kind === "EWALLET"
-                        : a.kind === "BANK"),
-              );
-              setManual(false);
-              interacted.current = true;
-              setDraft((old) => ({
-                ...old,
-                amount: candidate.amount
-                  ? String(candidate.amount)
-                  : old.amount,
-                merchant: candidate.merchant || old.merchant,
-                date: candidate.date ?? old.date,
-                paymentMethod: candidate.paymentMethod ?? old.paymentMethod,
-                sourceAccountId: candidate.paymentMethod
-                  ? possible.length === 1
-                    ? possible[0].id
-                    : ""
-                  : old.sourceAccountId,
-                creditCardId:
-                  possible.length === 1
-                    ? (possible[0].creditCardId ?? old.creditCardId)
-                    : old.creditCardId,
-                memo:
-                  [
-                    candidate.time ? `時刻 ${candidate.time}` : "",
-                    candidate.tax ? `税額 ${candidate.tax}円` : "",
-                    ...(candidate.products ?? []),
-                  ]
-                    .filter(Boolean)
-                    .join("\n") || old.memo,
-              }));
-              setReceiptImage(candidate.imageFile);
-            }}
-          />
+        {savedReceipt && (
+          <details>
+            <summary>保存したレシート</summary>
+            <img
+              className="receipt-preview"
+              alt="保存したレシート"
+              src={`data:${savedReceipt.mimeType};base64,${savedReceipt.imageBase64}`}
+            />
+          </details>
         )}
-        {expense?.receiptId &&
-          data.receipts?.find((r) => r.id === expense.receiptId) && (
-            <details>
-              <summary>保存したレシート</summary>
-              <img
-                className="receipt-preview"
-                alt="保存したレシート"
-                src={`data:${data.receipts.find((r) => r.id === expense.receiptId)!.mimeType};base64,${data.receipts.find((r) => r.id === expense.receiptId)!.imageBase64}`}
-              />
-            </details>
-          )}
+        {!expense && (
+          <div className="chips" aria-label="入力を再利用">
+            {previous && (
+              <button
+                type="button"
+                className="chip"
+                onClick={() => applyFavorite(previous)}
+              >
+                前回と同じ
+              </button>
+            )}
+            {data.favorites.slice(0, 6).map((f) => (
+              <button
+                type="button"
+                className="chip"
+                key={f.id}
+                onClick={() => applyFavorite(f)}
+              >
+                <Bookmark size={13} />
+                {f.name}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="expense-amount">
           <label htmlFor="expense-amount">いくら使いましたか？</label>
           <div>
@@ -439,123 +480,100 @@ export function ExpenseSheet({
             ))}
           </div>
         )}
-        <div className="quick-entry">
-          <Sparkles size={17} />
-          <input
-            aria-label="クイック入力"
-            placeholder="サイゼリヤ 1280 クレカ"
-            value={quick}
-            onChange={(e) => setQuick(e.target.value)}
-          />
-          <button
-            type="button"
-            className="text-button"
-            onClick={() => {
-              const parsed = parseQuickEntry(quick);
-              if (parsed.amount) {
-                setManual(false);
-                setDraft((old) => ({
-                  ...old,
-                  amount: String(parsed.amount),
-                  merchant: parsed.merchant,
-                  paymentMethod: parsed.paymentMethod ?? old.paymentMethod,
-                }));
-                setQuick("");
-              } else toast("「店名 金額」の順で入力してください");
-            }}
-          >
-            反映
-          </button>
-        </div>
-        {data.favorites.length > 0 && (
-          <div className="chips">
-            {data.favorites.map((f) => (
-              <button
-                type="button"
-                key={f.id}
-                className="chip"
-                onClick={() => applyFavorite(f)}
-              >
-                <Bookmark size={13} />
-                {f.name}
-              </button>
-            ))}
-          </div>
-        )}
-        <Field label="店名・内容">
-          <input
-            name="merchant"
-            maxLength={120}
-            placeholder="どこで、何に使いましたか？"
-            value={draft.merchant}
-            onChange={(e) => {
-              setManual(false);
-              update("merchant", e.target.value);
-            }}
-          />
-        </Field>
-        {recent.length > 0 && (
-          <div className="chips">
-            {recent.map((e) => (
+        {accountInput && (
+          <fieldset className="source-picker">
+            <legend>支払元</legend>
+            <div className="chips">
+              {sources.slice(0, 4).map((a) => (
+                <button
+                  type="button"
+                  className={
+                    draft.sourceAccountId === a.id ? "chip selected" : "chip"
+                  }
+                  aria-pressed={draft.sourceAccountId === a.id}
+                  key={a.id}
+                  onClick={() => {
+                    interacted.current = true;
+                    setDraft((old) => ({
+                      ...old,
+                      sourceAccountId: a.id,
+                      paymentMethod:
+                        a.kind === "CREDIT_CARD"
+                          ? "creditCard"
+                          : a.kind === "CASH"
+                            ? "cash"
+                            : a.kind === "BANK"
+                              ? "bank"
+                              : "other",
+                      creditCardId: a.creditCardId ?? "",
+                      paymentChannel:
+                        a.kind === "CASH" || a.kind === "BANK"
+                          ? "direct"
+                          : old.paymentChannel,
+                    }));
+                  }}
+                >
+                  {a.name}
+                </button>
+              ))}
               <button
                 type="button"
                 className="chip"
-                key={e.id}
-                onClick={() => {
-                  setManual(false);
-                  setDraft((old) => ({
-                    ...old,
-                    merchant: e.merchant,
-                    paymentMethod: e.paymentMethod,
-                    creditCardId: e.creditCardId ?? old.creditCardId,
-                    sourceAccountId: e.sourceAccountId ?? old.sourceAccountId,
-                  }));
-                }}
+                aria-expanded={showAllAccounts}
+                onClick={() => setShowAllAccounts(!showAllAccounts)}
               >
-                {e.merchant}
+                すべて
               </button>
-            ))}
-          </div>
+            </div>
+            {(showAllAccounts ||
+              (!sources
+                .slice(0, 4)
+                .some((a) => a.id === draft.sourceAccountId) &&
+                !!draft.sourceAccountId)) && (
+              <Field label="すべての支払元">
+                <select
+                  value={draft.sourceAccountId}
+                  onChange={(e) => {
+                    interacted.current = true;
+                    const a = sources.find((a) => a.id === e.target.value);
+                    setDraft((old) => ({
+                      ...old,
+                      sourceAccountId: e.target.value,
+                      paymentMethod:
+                        a?.kind === "CREDIT_CARD"
+                          ? "creditCard"
+                          : a?.kind === "CASH"
+                            ? "cash"
+                            : a?.kind === "BANK"
+                              ? "bank"
+                              : "other",
+                      creditCardId: a?.creditCardId ?? "",
+                      paymentChannel:
+                        a?.kind === "CASH" || a?.kind === "BANK"
+                          ? "direct"
+                          : old.paymentChannel,
+                    }));
+                  }}
+                >
+                  <option value="">選択してください</option>
+                  {sources.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                      {!a.isActive ? "（集計外）" : ""}
+                    </option>
+                  ))}
+                </select>
+                <Link to="/money?add=account" onClick={onClose}>
+                  支払元を追加
+                </Link>
+              </Field>
+            )}
+            {!draft.sourceAccountId && (
+              <small>支払元を選んでください。候補は自動確定しません。</small>
+            )}
+          </fieldset>
         )}
-        {data.settings.financialAutomationEnabled && (
-          <Field label="支払元">
-            <select
-              required
-              value={draft.sourceAccountId}
-              onChange={(e) => {
-                const a = data.accounts?.find((a) => a.id === e.target.value);
-                setDraft((old) => ({
-                  ...old,
-                  sourceAccountId: e.target.value,
-                  paymentMethod:
-                    a?.kind === "CREDIT_CARD"
-                      ? "creditCard"
-                      : a?.kind === "CASH"
-                        ? "cash"
-                        : a?.kind === "BANK"
-                          ? "bank"
-                          : "other",
-                  creditCardId: a?.creditCardId ?? old.creditCardId,
-                }));
-              }}
-            >
-              <option value="">選択してください</option>
-              {data.accounts
-                ?.filter(
-                  (a) =>
-                    (a.isActive && a.kind !== "SAVINGS") ||
-                    a.id === expense?.sourceAccountId,
-                )
-                .map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                    {!a.isActive ? "（集計外）" : ""}
-                  </option>
-                ))}
-            </select>
-          </Field>
-        )}
-        {!data.settings.financialAutomationEnabled && (
+        {!accountInput && (
           <fieldset className="payment-picker">
             <legend>支払方法</legend>
             {(Object.keys(paymentLabels) as PaymentMethod[]).map((p) => (
@@ -566,37 +584,31 @@ export function ExpenseSheet({
                 aria-pressed={draft.paymentMethod === p}
                 onClick={() => update("paymentMethod", p)}
               >
-                {p === "creditCard" ? (
-                  <CardIcon size={19} />
-                ) : (
-                  <Wallet size={19} />
-                )}
+                <Wallet size={18} />
                 <span>{paymentLabels[p]}</span>
               </button>
             ))}
+            <Link to="/money" onClick={onClose}>
+              支払元を登録する
+            </Link>
           </fieldset>
         )}
-        {draft.paymentMethod === "creditCard" && (
+        {draft.paymentMethod === "creditCard" && !accountInput && (
           <Field label="利用カード">
             <select
               required
               value={draft.creditCardId}
-              disabled={!!data.settings.financialAutomationEnabled}
               onChange={(e) => update("creditCardId", e.target.value)}
             >
-              <option value="">カードを選択</option>
+              <option value="">選択してください</option>
               {data.cards
                 .filter((c) => c.isActive || c.id === expense?.creditCardId)
                 .map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
-                    {c.last4 ? ` · ${c.last4}` : ""}
                   </option>
                 ))}
             </select>
-            <small>
-              使った日に支出へ反映。現金残高は引落まで変わりません。
-            </small>
           </Field>
         )}
         {draft.paymentMethod === "creditCard" && (
@@ -613,110 +625,240 @@ export function ExpenseSheet({
             </select>
           </Field>
         )}
-        {frequentCategories.length > 0 && (
-          <div className="chips" aria-label="よく使うカテゴリー">
-            {frequentCategories.map((c) => (
-              <button
-                type="button"
-                className="chip"
-                key={c.id}
-                onClick={() => {
+        {!expense && (
+          <ReceiptCapture
+            onOpenChange={setReceiptOpen}
+            onBusyChange={(busy) => {
+              receiptBusyRef.current = busy;
+              setReceiptBusy(busy);
+            }}
+            startOpen={startReceipt}
+            onApply={async (candidate) => {
+              receiptNeedsReview.current = candidate.needsReview ?? false;
+              const source = payableAccounts(data).find(
+                (a) => a.id === candidate.sourceAccountId,
+              );
+              const next: Draft = {
+                ...draft,
+                amount: String(candidate.amount ?? ""),
+                merchant: candidate.merchant ?? "",
+                date: candidate.date ?? today,
+                categoryId: candidate.categoryId ?? "uncategorized",
+                subcategoryId: candidate.subcategoryId ?? "",
+                sourceAccountId: source?.id ?? "",
+                creditCardId: source?.creditCardId ?? "",
+                paymentMethod: candidate.paymentMethod ?? draft.paymentMethod,
+                memo: [
+                  candidate.time ? "時刻 " + candidate.time : "",
+                  candidate.tax !== undefined
+                    ? "税額 " + candidate.tax + "円"
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join("\n"),
+              };
+              setManual(true);
+              interacted.current = true;
+              setDraft(next);
+              setReceiptImage(candidate.imageFile);
+              if (source && !candidate.inputOnly) {
+                receiptBusyRef.current = false;
+                receiptApplying.current = true;
+                try {
+                  if (!(await save(next, candidate.imageFile)))
+                    throw new Error("cancelled");
+                } finally {
+                  receiptApplying.current = false;
+                }
+              }
+            }}
+          />
+        )}
+        <details className="optional-expense">
+          <summary>店名・カテゴリー・日付など（任意）</summary>
+          <div className="quick-entry">
+            <Sparkles size={17} />
+            <input
+              aria-label="クイック入力"
+              placeholder="サイゼリヤ 1280 クレカ"
+              value={quick}
+              onChange={(e) => setQuick(e.target.value)}
+            />
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => {
+                const parsed = parseQuickEntry(quick);
+                if (parsed.amount) {
+                  setManual(false);
+                  setDraft((old) => ({
+                    ...old,
+                    amount: String(parsed.amount),
+                    merchant: parsed.merchant,
+                    paymentMethod: parsed.paymentMethod ?? old.paymentMethod,
+                  }));
+                  setQuick("");
+                } else toast("「店名 金額」の順で入力してください");
+              }}
+            >
+              反映
+            </button>
+          </div>
+          {data.favorites.length > 0 && (
+            <div className="chips">
+              {data.favorites.map((f) => (
+                <button
+                  type="button"
+                  key={f.id}
+                  className="chip"
+                  onClick={() => applyFavorite(f)}
+                >
+                  <Bookmark size={13} />
+                  {f.name}
+                </button>
+              ))}
+            </div>
+          )}
+          <Field label="店名・内容">
+            <input
+              name="merchant"
+              maxLength={120}
+              placeholder="どこで、何に使いましたか？"
+              value={draft.merchant}
+              onChange={(e) => {
+                setManual(false);
+                update("merchant", e.target.value);
+              }}
+            />
+          </Field>
+          {recent.length > 0 && (
+            <div className="chips">
+              {recent.map((e) => (
+                <button
+                  type="button"
+                  className="chip"
+                  key={e.id}
+                  onClick={() => {
+                    setManual(false);
+                    setDraft((old) => ({
+                      ...old,
+                      merchant: e.merchant,
+                      paymentMethod: e.paymentMethod,
+                      creditCardId: e.creditCardId ?? old.creditCardId,
+                      sourceAccountId: e.sourceAccountId ?? old.sourceAccountId,
+                    }));
+                  }}
+                >
+                  {e.merchant}
+                </button>
+              ))}
+            </div>
+          )}
+          {frequentCategories.length > 0 && (
+            <div className="chips" aria-label="よく使うカテゴリー">
+              {frequentCategories.map((c) => (
+                <button
+                  type="button"
+                  className="chip"
+                  key={c.id}
+                  onClick={() => {
+                    setManual(true);
+                    setDraft((old) => ({
+                      ...old,
+                      categoryId: c.id,
+                      subcategoryId: "",
+                    }));
+                  }}
+                >
+                  {c.name}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="form-grid">
+            <Field label="カテゴリー">
+              <select
+                value={draft.categoryId}
+                onChange={(e) => {
                   setManual(true);
                   setDraft((old) => ({
                     ...old,
-                    categoryId: c.id,
+                    categoryId: e.target.value,
                     subcategoryId: "",
                   }));
                 }}
               >
-                {c.name}
-              </button>
-            ))}
-          </div>
-        )}
-        <div className="form-grid">
-          <Field label="カテゴリー">
-            <select
-              value={draft.categoryId}
-              onChange={(e) => {
-                setManual(true);
-                setDraft((old) => ({
-                  ...old,
-                  categoryId: e.target.value,
-                  subcategoryId: "",
-                }));
-              }}
-            >
-              {data.categories
-                .filter((c) => !c.archived || c.id === draft.categoryId)
-                .map((c) => (
+                {data.categories
+                  .filter((c) => !c.archived || c.id === draft.categoryId)
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+              </select>
+            </Field>
+            <Field label="内訳">
+              <select
+                value={draft.subcategoryId}
+                onChange={(e) => {
+                  setManual(true);
+                  update("subcategoryId", e.target.value);
+                }}
+              >
+                <option value="">指定なし</option>
+                {selectedCategory?.subcategories.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
                   </option>
                 ))}
-            </select>
-          </Field>
-          <Field label="内訳">
-            <select
-              value={draft.subcategoryId}
-              onChange={(e) => {
-                setManual(true);
-                update("subcategoryId", e.target.value);
-              }}
-            >
-              <option value="">指定なし</option>
-              {selectedCategory?.subcategories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-        </div>
-        <p className="microcopy">
-          {manual ? (
-            <>
-              <Check size={14} />
-              次回からこの分類を使用します
-            </>
-          ) : suggestion.confidence === "high" ? (
-            <>
-              <Sparkles size={14} />
-              店名から分類しました
-            </>
-          ) : suggestion.confidence === "medium" ? (
-            `${suggestion.source === "pattern" ? "記録からの候補 · " : ""}${selectedCategory?.name}？ 分類を確認してください`
-          ) : (
-            "カテゴリーはあとから変更できます"
-          )}
-        </p>
-        <Field label="日付">
-          <input
-            type="date"
-            required
-            max={today}
-            value={draft.date}
-            onChange={(e) => update("date", e.target.value)}
-          />
-        </Field>
-        <details>
-          <summary>メモ・お気に入り</summary>
-          <Field label="メモ">
-            <textarea
-              rows={2}
-              maxLength={1000}
-              value={draft.memo}
-              onChange={(e) => update("memo", e.target.value)}
-            />
-          </Field>
-          <label className="check-field">
+              </select>
+            </Field>
+          </div>
+          <p className="microcopy">
+            {manual ? (
+              <>
+                <Check size={14} />
+                次回からこの分類を使用します
+              </>
+            ) : suggestion.confidence === "high" ? (
+              <>
+                <Sparkles size={14} />
+                店名から分類しました
+              </>
+            ) : suggestion.confidence === "medium" ? (
+              `${suggestion.source === "pattern" ? "記録からの候補 · " : ""}${selectedCategory?.name}？ 分類を確認してください`
+            ) : (
+              "カテゴリーはあとから変更できます"
+            )}
+          </p>
+          <Field label="日付">
             <input
-              type="checkbox"
-              checked={favorite}
-              onChange={(e) => setFavorite(e.target.checked)}
+              type="date"
+              required
+              max={today}
+              value={draft.date}
+              onChange={(e) => update("date", e.target.value)}
             />
-            この内容をお気に入りに追加
-          </label>
+          </Field>
+          <details>
+            <summary>メモ・お気に入り</summary>
+            <Field label="メモ">
+              <textarea
+                rows={2}
+                maxLength={1000}
+                value={draft.memo}
+                onChange={(e) => update("memo", e.target.value)}
+              />
+            </Field>
+            <label className="check-field">
+              <input
+                type="checkbox"
+                checked={favorite}
+                onChange={(e) => setFavorite(e.target.checked)}
+              />
+              この内容をお気に入りに追加
+            </label>
+          </details>
         </details>
       </AsyncForm>
     </Sheet>
