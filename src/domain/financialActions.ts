@@ -106,6 +106,7 @@ export async function reconcileAccount(
       snapshotBalance: newBalance,
       balanceAsOf: date,
       snapshotRecordedAt: now,
+      lastVerifiedAt: now,
       updatedAt: now,
     });
     await db.accountAdjustments.add({
