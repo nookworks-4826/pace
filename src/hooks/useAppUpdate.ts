@@ -1,3 +1,5 @@
+import { readAppData } from "../db";
+import { validateData } from "../domain/backup/schema";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRegisterSW } from "virtual:pwa-register/react";
 import { checkServiceWorkerUpdate } from "../domain/appUpdate";
@@ -134,6 +136,17 @@ export function useAppUpdate() {
     if (busy.current) return;
     if (document.querySelector('[role="dialog"]'))
       return "入力・設定画面を保存して閉じてから、更新してください。";
+    try {
+      validateData(await readAppData());
+    } catch {
+      return "記録の確認を完了できませんでした。更新せず、バックアップを確認してください。";
+    }
+    if (
+      !confirm(
+        "更新前にバックアップの保存先を確認してください。更新を続けますか？",
+      )
+    )
+      return;
     if (reloadPending.current) {
       window.location.reload();
       return;
