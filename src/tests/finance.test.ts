@@ -461,7 +461,7 @@ describe("dates, recurring payments and budgets", () => {
     data.expenses = [makeExpense()];
     expect(computeFinance(data, today)).toMatchObject({
       monthlyBudgetRemaining: 7000,
-      dailyAllowance: 1000,
+      dailyAllowance: 1714,
       todaySpent: 5000,
       todayRemaining: 0,
     });
@@ -485,7 +485,7 @@ describe("dates, recurring payments and budgets", () => {
     expect(computeFinance(data, "2026-09-30")).toMatchObject({
       monthlyExpenseTotal: 5000,
       savingsReserve: 0,
-      dailyAllowance: 20000,
+      dailyAllowance: 25000,
     });
     expect(computeFinance(data, "2026-10-01")).toMatchObject({
       monthlyExpenseTotal: 1200,

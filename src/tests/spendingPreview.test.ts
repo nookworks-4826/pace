@@ -31,6 +31,7 @@ const summary = (values: Partial<FinanceSummary> = {}): FinanceSummary => ({
   totalAssets: 12000,
   lastFinancialUpdatedAt: null,
   financialDataIsStale: false,
+  balanceConfidence: 'high',
   unknownAccountIds: [],
   unallocatedRecordIds: [],
   accountingWarnings: [],

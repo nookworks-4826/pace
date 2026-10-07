@@ -755,7 +755,7 @@ describe("portable spreadsheet exports", () => {
     expect(unlinked.getWorksheet("返金・未分類")?.getCell("E2").value).toBe(
       "未分類",
     );
-  });
+  }, 30_000); // Cold ExcelJS import/XLSX decoding on Windows can exceed 5 seconds.
   it("writes BOM CSV with escaped text and protects spreadsheet formula injection", () => {
     const data = fixture();
     data.expenses[0].merchant = '=HYPERLINK("bad", "click")';
