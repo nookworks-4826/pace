@@ -1,3 +1,8 @@
+import { PracticalWelcome } from "./Practical";
+import { AdaptiveHome, HomeQuickActions } from "./AdaptiveHome";
+import { ReminderCenter } from "./ReminderCenter";
+import { TransferEditor } from "./Money";
+import { BalanceCheck } from "./BalanceCheck";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -14,7 +19,6 @@ import {
   ShieldCheck,
   Sun,
   Target,
-  Wallet,
 } from "lucide-react";
 import { usePace } from "../app/context";
 import { Empty, Progress, SectionTitle, Sheet, yen } from "../components/UI";
@@ -29,13 +33,14 @@ import {
 import { APP_NAME } from "../types";
 import { FinanceEditor } from "./Management";
 import type { Editor } from "./Management";
-import { ExpenseRow } from "./History";
 import { SpendingPreview } from "./SpendingPreview";
 import { moneyAllocation } from "../domain/spendingPreview";
 
 export function Home() {
   const { data, finance: f, today, openExpense, run } = usePace();
   const navigate = useNavigate();
+  const [transfer, setTransfer] = useState(false);
+  const [balanceCheck, setBalanceCheck] = useState(false);
   const [details, setDetails] = useState(false);
   const [editor, setEditor] = useState<Editor | null>(null);
   const allocation = moneyAllocation(f);
@@ -43,9 +48,7 @@ export function Home() {
   const attention = !negative && f.pace.ratio !== null && f.pace.ratio > 1.25;
   const remainingDays = f.cycle.remainingDaysIncludingToday;
   const salaryCycle = f.cycle.mode === "salary";
-  const todayBudgetSpent = salaryCycle
-    ? f.todayDiscretionarySpent
-    : f.todaySpent;
+  const todayBudgetSpent = f.todayDiscretionarySpent;
   const currentIncome = salaryCycle
     ? f.periodIncomeTotal
     : f.monthlyIncomeTotal;
@@ -170,12 +173,6 @@ export function Home() {
     },
   ];
   const completed = checks.filter((c) => c.ok).length;
-  const recent = [...data.expenses]
-    .sort(
-      (a, b) =>
-        b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt),
-    )
-    .slice(0, 4);
   const prior = monthKey(addMonthsDate(today, -1));
   const priorExp = data.expenses.filter((e) => e.date.startsWith(prior));
   const priorIncome = data.incomes
@@ -276,11 +273,23 @@ export function Home() {
             </div>
           </div>
         )}
+        <div className="hero-guidance">
+          <div>
+            <span>今日の目安</span>
+            <strong>
+              {f.dailyAllowance === null ? "—" : yen(f.dailyAllowance)}
+            </strong>
+          </div>
+          <div>
+            <span>明日の目安</span>
+            <strong>
+              {f.tomorrowAllowance === null ? "—" : yen(f.tomorrowAllowance)}
+            </strong>
+          </div>
+        </div>
         <div className="hero-footer">
-          <span>持っているお金</span>
-          <strong>
-            {f.liquidBalance === null ? "未入力" : yen(f.liquidBalance)}
-          </strong>
+          <span>{salaryCycle ? "給料日まで" : "今期の残り"}</span>
+          <strong>{remainingDays}日</strong>
           <ChevronRight size={16} />
         </div>
       </button>
@@ -289,99 +298,18 @@ export function Home() {
           <Link className="text-button" to="/money">
             使える資産の内訳 <ChevronRight size={15} />
           </Link>
-          <Link className="text-button" to="/financial">
+          <Link className="text-button" to="/money?verify=1">
             {f.lastFinancialUpdatedAt
               ? `${new Intl.DateTimeFormat("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }).format(new Date(f.lastFinancialUpdatedAt))}時点`
-              : "金融機関"}
+              : "確認日時を見る"}
           </Link>
         </div>
       )}
       {f.financialDataIsStale && (
         <p className="notice">
-          情報が古い可能性があります。金融機関から更新できます。
+          一部の残高が古いため目安です。残高確認で更新できます。
         </p>
       )}
-      <section className="today-card surface">
-        <div className="today-top">
-          <div>
-            <p className="muted">今日の目安</p>
-            <div
-              className="daily-number"
-              style={
-                f.dailyAllowance !== null && yen(f.dailyAllowance).length > 10
-                  ? { fontSize: "clamp(1rem,4.6vw,1.4rem)" }
-                  : undefined
-              }
-            >
-              {f.dailyAllowance === null ? "—" : yen(f.dailyAllowance)}
-            </div>
-          </div>
-          <div className="today-remaining">
-            <span>今日はあと</span>
-            <strong
-              style={
-                f.todayRemaining !== null && yen(f.todayRemaining).length > 10
-                  ? { fontSize: "clamp(.9rem,4vw,1.2rem)" }
-                  : undefined
-              }
-            >
-              {f.todayRemaining === null ? "—" : yen(f.todayRemaining)}
-            </strong>
-          </div>
-        </div>
-        <Progress
-          value={
-            f.dailyAllowance
-              ? (todayBudgetSpent / f.dailyAllowance) * 100
-              : todayBudgetSpent > 0
-                ? 100
-                : 0
-          }
-          label="今日の目安に対する支出"
-        />
-        <div className="today-bottom">
-          <span>
-            {salaryCycle ? "今日の支出（固定費以外）" : "今日使った額"}{" "}
-            <b>{yen(salaryCycle ? f.todayDiscretionarySpent : f.todaySpent)}</b>
-          </span>
-          <span>
-            {f.dailyAllowance
-              ? `${Math.round((todayBudgetSpent / f.dailyAllowance) * 100)}%`
-              : "—"}
-          </span>
-        </div>
-        {f.dailyAllowance === null ? (
-          <button
-            className="text-button"
-            onClick={() =>
-              accountMode ? navigate("/money") : setEditor({ mode: "balance" })
-            }
-          >
-            現在残高を入力する
-            <ArrowUpRight size={15} />
-          </button>
-        ) : (
-          <p className="daily-caption">
-            {negative
-              ? "予定を含めると残高が不足しています。内訳を確認できます。"
-              : f.overspentToday !== null && f.overspentToday > 0
-                ? `今日の目安を${yen(f.overspentToday)}上回っています。`
-                : `${salaryCycle ? "今期" : "月末"}まであと${remainingDays}日。`}
-          </p>
-        )}
-        <div className="info-pair">
-          <span>明日の目安</span>
-          <strong>
-            {f.tomorrowAllowance === null ? "—" : yen(f.tomorrowAllowance)}
-          </strong>
-        </div>
-        <p className="hint">
-          {f.tomorrowAllowance === null &&
-          f.cycle.remainingDaysIncludingToday === 1
-            ? "次の期間の入金・予定を確認してから計算します。"
-            : "今日を目安内に収めた場合"}
-        </p>
-      </section>
       <button
         className="button button-primary primary-add"
         onClick={() => openExpense()}
@@ -389,6 +317,118 @@ export function Home() {
         <Plus size={23} />
         支出を記録
       </button>
+      <PracticalWelcome />
+      {(data.expenseInbox?.length ?? 0) > 0 && (
+        <Link className="text-button" to="/inbox">
+          あとで整理 · {data.expenseInbox!.length}件 →
+        </Link>
+      )}
+      <HomeQuickActions
+        onIncome={() => setEditor({ mode: "income" })}
+        onReceipt={() => openExpense(undefined, true)}
+        onTransfer={() =>
+          accountMode ? setTransfer(true) : navigate("/money")
+        }
+        onBalance={() =>
+          accountMode ? setBalanceCheck(true) : setEditor({ mode: "balance" })
+        }
+      />
+      <details
+        className="today-progress-details"
+        open={f.dailyAllowance === null}
+      >
+        <summary>
+          今日の記録
+          <span>
+            {f.todayRemaining === null
+              ? "目安を設定"
+              : "今日はあと " + yen(f.todayRemaining)}
+          </span>
+        </summary>
+        <section className="today-card surface">
+          <div className="today-top">
+            <div>
+              <p className="muted">今日の目安</p>
+              <div
+                className="daily-number"
+                style={
+                  f.dailyAllowance !== null && yen(f.dailyAllowance).length > 10
+                    ? { fontSize: "clamp(1rem,4.6vw,1.4rem)" }
+                    : undefined
+                }
+              >
+                {f.dailyAllowance === null ? "—" : yen(f.dailyAllowance)}
+              </div>
+            </div>
+            <div className="today-remaining">
+              <span>今日はあと</span>
+              <strong
+                style={
+                  f.todayRemaining !== null && yen(f.todayRemaining).length > 10
+                    ? { fontSize: "clamp(.9rem,4vw,1.2rem)" }
+                    : undefined
+                }
+              >
+                {f.todayRemaining === null ? "—" : yen(f.todayRemaining)}
+              </strong>
+            </div>
+          </div>
+          <Progress
+            value={
+              f.dailyAllowance
+                ? (todayBudgetSpent / f.dailyAllowance) * 100
+                : todayBudgetSpent > 0
+                  ? 100
+                  : 0
+            }
+            label="今日の目安に対する支出"
+          />
+          <div className="today-bottom">
+            <span>
+              今日の支出（固定費以外） <b>{yen(f.todayDiscretionarySpent)}</b>
+            </span>
+            <span>
+              {f.dailyAllowance
+                ? `${Math.round((todayBudgetSpent / f.dailyAllowance) * 100)}%`
+                : "—"}
+            </span>
+          </div>
+          {f.dailyAllowance === null ? (
+            <button
+              className="text-button"
+              onClick={() =>
+                accountMode
+                  ? navigate("/money")
+                  : setEditor({ mode: "balance" })
+              }
+            >
+              現在残高を入力する
+              <ArrowUpRight size={15} />
+            </button>
+          ) : (
+            <p className="daily-caption">
+              {negative
+                ? "予定を含めると残高が不足しています。内訳を確認できます。"
+                : f.overspentToday !== null && f.overspentToday > 0
+                  ? `今日の目安を${yen(f.overspentToday)}上回っています。`
+                  : `${salaryCycle ? "今期" : "月末"}まであと${remainingDays}日。`}
+            </p>
+          )}
+          <div className="info-pair">
+            <span>明日の目安</span>
+            <strong>
+              {f.tomorrowAllowance === null ? "—" : yen(f.tomorrowAllowance)}
+            </strong>
+          </div>
+          <p className="hint">
+            {f.tomorrowAllowance === null &&
+            f.cycle.remainingDaysIncludingToday === 1
+              ? "次の期間の入金・予定を確認してから計算します。"
+              : "今日を目安内に収めた場合"}
+          </p>
+        </section>
+      </details>
+      <ReminderCenter compact />
       {!data.settings.helpDismissed && (
         <div className="help-tip">
           <span>
@@ -492,144 +532,126 @@ export function Home() {
           <small>引落前のお金</small>
         </div>
       </div>
-      {data.settings.lastSeenMonth !== monthKey(today) &&
-        priorExp.length > 0 && (
-          <div className="surface month-review">
-            <span className="eyebrow">LAST MONTH</span>
-            <h2>{Number(prior.slice(5, 7))}月の振り返り</h2>
-            <p>
-              収入 {yen(priorIncome)} · 支出 {yen(priorSpent)}
-            </p>
-            <p>収支 {yen(priorIncome - priorSpent)}</p>
-            <div className="button-row">
-              <button
-                className="text-button"
-                onClick={() => navigate(`/analytics?month=${prior}&report=1`)}
-              >
-                レポートを見る
-              </button>
-              <button
-                className="text-button"
-                onClick={() =>
-                  void run(() =>
-                    updateSettings({ lastSeenMonth: monthKey(today) }),
-                  )
-                }
-              >
-                閉じる
-              </button>
+      <AdaptiveHome />
+      <details className="home-details">
+        <summary>これからの予定・借入・貯金</summary>
+        {data.settings.lastSeenMonth !== monthKey(today) &&
+          priorExp.length > 0 && (
+            <div className="surface month-review">
+              <span className="eyebrow">LAST MONTH</span>
+              <h2>{Number(prior.slice(5, 7))}月の振り返り</h2>
+              <p>
+                収入 {yen(priorIncome)} · 支出 {yen(priorSpent)}
+              </p>
+              <p>収支 {yen(priorIncome - priorSpent)}</p>
+              <div className="button-row">
+                <button
+                  className="text-button"
+                  onClick={() => navigate(`/analytics?month=${prior}&report=1`)}
+                >
+                  レポートを見る
+                </button>
+                <button
+                  className="text-button"
+                  onClick={() =>
+                    void run(() =>
+                      updateSettings({ lastSeenMonth: monthKey(today) }),
+                    )
+                  }
+                >
+                  閉じる
+                </button>
+              </div>
             </div>
-          </div>
-        )}
-      <SectionTitle
-        title="これから"
-        action="すべて見る"
-        onClick={() => navigate("/timeline")}
-      />
-      <section className="surface upcoming-list">
-        {upcoming.length === 0 ? (
-          <Empty icon={<CalendarDays />}>
-            予定はまだありません。
-            <br />
-            給料日や固定費を設定できます。
-          </Empty>
-        ) : (
-          upcoming.map((item) => (
-            <Link className="upcoming-row" key={item.id} to={item.href}>
-              <div className="date-block">
-                <small>{Number(item.date.slice(5, 7))}月</small>
-                <b>{Number(item.date.slice(8))}</b>
-              </div>
-              <div>
-                <strong>{item.name}</strong>
-                <small>{item.type}</small>
-              </div>
-              <div className="upcoming-amount">
-                <b>
-                  {item.id === "salary"
-                    ? item.amount < 0
-                      ? `+${yen(-item.amount)}`
-                      : "額は未設定"
-                    : `−${yen(item.amount)}`}
-                </b>
-                <span>予定</span>
-              </div>
-            </Link>
-          ))
-        )}
-      </section>
-      <SectionTitle title="お金の行き先" />
-      <div className="money-destinations">
-        <Link to="/manage/cards" className="surface destination">
-          <CreditCard />
-          <span>カード未払い</span>
-          <strong>{yen(f.cardOutstanding)}</strong>
-          <ChevronRight size={16} />
-        </Link>
-        <Link to="/manage/debts" className="surface destination">
-          <Landmark />
-          <span>返済残高</span>
-          <strong>{yen(totalDebt)}</strong>
-          <ChevronRight size={16} />
-        </Link>
-        <Link to="/manage/savings" className="surface destination">
-          <Target />
-          <span>貯金</span>
-          <strong>{yen(totalSavings)}</strong>
-          <ChevronRight size={16} />
-        </Link>
-      </div>
-      {completed < 5 && (
-        <section className="setup-card">
-          <div className="section-heading">
-            <h2>{APP_NAME}をもっと正確に</h2>
-            <small>{completed} / 5 完了</small>
-          </div>
-          <Progress value={(completed / 5) * 100} label="セットアップ進捗" />
-          <div className="setup-checks">
-            {checks.map((c) => (
-              <button
-                key={c.id}
-                onClick={c.action}
-                className={c.ok ? "done" : ""}
-              >
-                {c.ok ? <Check size={14} /> : <Plus size={14} />} {c.label}
-              </button>
-            ))}
-          </div>
-          <p className="hint">
-            未入力の予定があると、使っていい金額が実際より多く表示されることがあります。
-          </p>
+          )}
+        <SectionTitle
+          title="これから"
+          action="すべて見る"
+          onClick={() => navigate("/timeline")}
+        />
+        <section className="surface upcoming-list">
+          {upcoming.length === 0 ? (
+            <Empty icon={<CalendarDays />}>
+              予定はまだありません。
+              <br />
+              給料日や固定費を設定できます。
+            </Empty>
+          ) : (
+            upcoming.map((item) => (
+              <Link className="upcoming-row" key={item.id} to={item.href}>
+                <div className="date-block">
+                  <small>{Number(item.date.slice(5, 7))}月</small>
+                  <b>{Number(item.date.slice(8))}</b>
+                </div>
+                <div>
+                  <strong>{item.name}</strong>
+                  <small>{item.type}</small>
+                </div>
+                <div className="upcoming-amount">
+                  <b>
+                    {item.id === "salary"
+                      ? item.amount < 0
+                        ? `+${yen(-item.amount)}`
+                        : "額は未設定"
+                      : `−${yen(item.amount)}`}
+                  </b>
+                  <span>予定</span>
+                </div>
+              </Link>
+            ))
+          )}
         </section>
-      )}
-      <SectionTitle
-        title="最近の支出"
-        action="履歴を見る"
-        onClick={() => navigate("/history")}
-      />
-      <div className="surface transaction-list">
-        {recent.length ? (
-          recent.map((e) => <ExpenseRow key={e.id} expense={e} />)
-        ) : (
-          <Empty
-            icon={<Wallet />}
-            action={
-              <button className="text-button" onClick={() => openExpense()}>
-                最初の支出を追加
-                <Plus size={17} />
-              </button>
-            }
-          >
-            まだ支出はありません。
-            <br />
-            使ったらここから記録できます。
-          </Empty>
+        <SectionTitle title="お金の行き先" />
+        <div className="money-destinations">
+          <Link to="/manage/cards" className="surface destination">
+            <CreditCard />
+            <span>カード未払い</span>
+            <strong>{yen(f.cardOutstanding)}</strong>
+            <ChevronRight size={16} />
+          </Link>
+          <Link to="/manage/debts" className="surface destination">
+            <Landmark />
+            <span>返済残高</span>
+            <strong>{yen(totalDebt)}</strong>
+            <ChevronRight size={16} />
+          </Link>
+          <Link to="/manage/savings" className="surface destination">
+            <Target />
+            <span>貯金</span>
+            <strong>{yen(totalSavings)}</strong>
+            <ChevronRight size={16} />
+          </Link>
+        </div>
+        {completed < 5 && (
+          <section className="setup-card">
+            <div className="section-heading">
+              <h2>{APP_NAME}をもっと正確に</h2>
+              <small>{completed} / 5 完了</small>
+            </div>
+            <Progress value={(completed / 5) * 100} label="セットアップ進捗" />
+            <div className="setup-checks">
+              {checks.map((c) => (
+                <button
+                  key={c.id}
+                  onClick={c.action}
+                  className={c.ok ? "done" : ""}
+                >
+                  {c.ok ? <Check size={14} /> : <Plus size={14} />} {c.label}
+                </button>
+              ))}
+            </div>
+            <p className="hint">
+              未入力の予定があると、使っていい金額が実際より多く表示されることがあります。
+            </p>
+          </section>
         )}
-      </div>
+      </details>
       <button className="balance-help" onClick={() => setDetails(true)}>
         <Info size={15} />
         この金額が違う？
       </button>
+      {transfer && <TransferEditor onClose={() => setTransfer(false)} />}
+      {balanceCheck && <BalanceCheck onClose={() => setBalanceCheck(false)} />}
       {details && (
         <Sheet title="今使っていい金額の内訳" onClose={() => setDetails(false)}>
           <p className="hint">

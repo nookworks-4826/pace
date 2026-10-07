@@ -28,20 +28,31 @@ import {
 } from "lucide-react";
 import { usePace } from "../app/context";
 import { AsyncForm, Field, Sheet, textValue, yen } from "../components/UI";
-import { clearAllData, db, restoreAppData, updateSettings } from "../db";
+import {
+  clearAllData,
+  db,
+  readAppData,
+  restoreAppData,
+  updateSettings,
+} from "../db";
 import {
   buildCSV,
   buildExcel,
   createBackup,
-  encryptBackup,
   parseBackup,
 } from "../domain/backup";
 import { disableLock } from "../domain/security";
 import { APP_NAME, APP_VERSION } from "../types";
-import type { AppData, Category } from "../types";
+import type { AppData, Category, Favorite, BackupHealth } from "../types";
+import {
+  checkedEncryptedBackup,
+  backupHealthLabel,
+} from "../domain/backupHealth";
+import { FavoriteEditor } from "./Practical";
 import { FinanceEditor } from "./Management";
 import type { Editor } from "./Management";
 import { SecuritySettings } from "./Security";
+import { ExperienceSettings, AppearanceControls } from "./ExperienceSettings";
 
 export function Settings() {
   const { data, today, run, toast, appUpdate } = usePace();
@@ -60,7 +71,14 @@ export function Settings() {
       setSearchParams(next, { replace: true });
     }
   };
-  const [ready, setReady] = useState<{ blob: Blob; name: string } | null>(null);
+  const [favoriteEditor, setFavoriteEditor] = useState<Favorite | true | null>(
+    null,
+  );
+  const [ready, setReady] = useState<{
+    blob: Blob;
+    name: string;
+    health?: BackupHealth;
+  } | null>(null);
   const [restoring, setRestoring] = useState<AppData | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [category, setCategory] = useState<Category | null>(null);
@@ -70,6 +88,7 @@ export function Settings() {
   const exportFile = async (type: "json" | "csv" | "excel") => {
     setBusy(true);
     await run(async () => {
+      const data = await readAppData();
       const blob =
         type === "excel"
           ? await buildExcel(data)
@@ -124,12 +143,20 @@ export function Settings() {
           <p>手入力とCSVで管理します。広告・解析はありません。</p>
         </div>
       </div>
+      <ExperienceSettings />
       <h2 className="settings-label">お金の管理</h2>
       <div className="surface settings-group">
         {link(<Wallet />, "銀行・現金・電子マネー", "/money")}
-        {row(<Wallet />, "残高を合わせる", () =>
-          setEditor({ mode: "balance" }),
-        )}
+        {data.settings.financialAutomationEnabled
+          ? link(
+              <Wallet />,
+              "残高を合わせる",
+              "/money?verify=1",
+              "変わっていない欄は入力不要",
+            )
+          : row(<Wallet />, "残高を合わせる", () =>
+              setEditor({ mode: "balance" }),
+            )}
         {link(<CreditCard />, "カード", "/manage/cards")}
         {link(<Landmark />, "借入と返済", "/manage/debts")}
         {link(<Target />, "貯金目標", "/manage/savings")}
@@ -183,6 +210,9 @@ export function Settings() {
       <div className="surface settings-group">
         {row(<Tags />, "カテゴリー", () => setPanel("categories"))}
         {row(<Bookmark />, "お気に入り", () => setPanel("favorites"))}
+        <Link className="settings-row" to="/recent-changes">
+          最近の変更・元に戻す →
+        </Link>
         {row(
           <HelpCircle />,
           "初回ヒントをもう一度見る",
@@ -289,35 +319,56 @@ export function Settings() {
                   <option value="dark">ダーク</option>
                 </select>
               </Field>
+              <AppearanceControls />
               <div className="theme-picker">
-                {(["default", "midnight", "forest", "mono"] as const).map(
-                  (t) => (
-                    <button
-                      key={t}
-                      data-swatch={t}
-                      className={data.settings.theme === t ? "selected" : ""}
-                      onClick={() =>
-                        void run(() => updateSettings({ theme: t }))
-                      }
-                    >
-                      <span />
+                {(
+                  [
+                    "default",
+                    "softWhite",
+                    "glassLight",
+                    "midnight",
+                    "forest",
+                    "mono",
+                  ] as const
+                ).map((t) => (
+                  <button
+                    key={t}
+                    data-swatch={t}
+                    className={data.settings.theme === t ? "selected" : ""}
+                    onClick={() => void run(() => updateSettings({ theme: t }))}
+                  >
+                    <span />
+                    {
                       {
-                        {
-                          default: "サニー",
-                          midnight: "スカイ",
-                          forest: "ミント",
-                          mono: "ニュートラル",
-                        }[t]
-                      }
-                    </button>
-                  ),
-                )}
+                        default: "Pace Default",
+                        softWhite: "Soft White",
+                        glassLight: "Glass Light",
+                        midnight: "Midnight",
+                        forest: "Forest",
+                        mono: "Mono",
+                      }[t]
+                    }
+                  </button>
+                ))}
               </div>
             </>
           )}
           {panel === "security" && <SecuritySettings />}
           {panel === "data" && (
             <>
+              <p>
+                バックアップ確認：
+                {backupHealthLabel(data.settings.practical?.backupHealth)}
+                {data.settings.practical?.backupHealth &&
+                  ` · ${new Date(data.settings.practical.backupHealth.checkedAt).toLocaleString("ja-JP")}`}
+              </p>
+              <Link
+                className="text-button"
+                to="/recent-changes"
+                onClick={closePanel}
+              >
+                最近の変更・元に戻す →
+              </Link>
               <p className="note-panel">
                 端末内保存のため、ブラウザデータ削除で失われる可能性があります。定期的なバックアップをおすすめします。
               </p>
@@ -355,12 +406,41 @@ export function Settings() {
                     const password = String(f.get("password") ?? "");
                     if (password !== String(f.get("confirm") ?? ""))
                       throw new Error("パスワードが一致しません。");
-                    setReady({
-                      blob: new Blob([await encryptBackup(data, password)], {
-                        type: "application/octet-stream",
-                      }),
-                      name: `pace-${today}.pacebackup`,
-                    });
+                    try {
+                      const checked = await checkedEncryptedBackup(
+                        await readAppData(),
+                        password,
+                      );
+                      await updateSettings({
+                        practical: {
+                          ...data.settings.practical,
+                          backupHealth: checked.health,
+                        },
+                      });
+                      setReady({
+                        blob: new Blob([checked.text], {
+                          type: "application/octet-stream",
+                        }),
+                        name: `pace-${today}.pacebackup`,
+                        health: checked.health,
+                      });
+                    } catch (error) {
+                      setReady(null);
+                      await updateSettings({
+                        practical: {
+                          ...data.settings.practical,
+                          backupHealth: {
+                            status: "failed",
+                            checkedAt: new Date().toISOString(),
+                            encrypted: true,
+                            schemaVersion: 4,
+                            bytes: 0,
+                            savedConfirmed: false,
+                          },
+                        },
+                      });
+                      throw error;
+                    }
                     toast("暗号化しました。保存ボタンから保存できます");
                   }}
                 >
@@ -393,19 +473,48 @@ export function Settings() {
                 <div className="download-ready">
                   <b>保存の準備ができました</b>
                   <small>{ready.name}</small>
+                  {ready.health && (
+                    <>
+                      <p>
+                        確認状態：
+                        {backupHealthLabel(ready.health)}
+                      </p>
+                      <p className="hint">
+                        暗号化・復号・形式・参照関係は確認済みです。端末の保存先はPaceから確認できません。
+                      </p>
+                      <button
+                        className="button button-secondary full"
+                        onClick={() =>
+                          void run(async () => {
+                            const health = {
+                              ...ready.health!,
+                              status: "normal" as const,
+                              savedConfirmed: true,
+                            };
+                            await updateSettings({
+                              lastBackupAt: new Date().toISOString(),
+                              practical: {
+                                ...data.settings.practical,
+                                backupHealth: health,
+                              },
+                            });
+                            setReady((current) =>
+                              current?.blob === ready.blob
+                                ? { ...current, health }
+                                : current,
+                            );
+                            toast("保存先を確認したことを記録しました");
+                          })
+                        }
+                      >
+                        保存先にファイルがあることを確認した
+                      </button>
+                    </>
+                  )}
                   <button
                     className="button button-primary full"
                     onClick={() => {
                       saveAs(ready.blob, ready.name);
-                      if (
-                        ready.name.endsWith(".json") ||
-                        ready.name.endsWith(".pacebackup")
-                      )
-                        void run(() =>
-                          updateSettings({
-                            lastBackupAt: new Date().toISOString(),
-                          }),
-                        );
                     }}
                   >
                     <Download size={18} />
@@ -656,16 +765,30 @@ export function Settings() {
           )}
           {panel === "favorites" && (
             <>
+              <button
+                className="button button-secondary full"
+                onClick={() => setFavoriteEditor(true)}
+              >
+                お気に入りを追加
+              </button>
               {data.favorites.length === 0 ? (
                 <p className="empty-state">
-                  支出入力の「メモ・お気に入り」から追加できます。
+                  よく使う支払元や店名を登録できます。
                 </p>
               ) : (
                 data.favorites.map((f) => (
                   <div className="list-row" key={f.id}>
                     <div>
                       <b>{f.name}</b>
-                      <small>{yen(f.amount)}</small>
+                      <small>
+                        {f.amount ? yen(f.amount) : "金額は入力時に選ぶ"}
+                      </small>
+                      <button
+                        className="text-button"
+                        onClick={() => setFavoriteEditor(f)}
+                      >
+                        編集
+                      </button>
                     </div>
                     <button
                       className="icon-button"
@@ -687,6 +810,12 @@ export function Settings() {
             </>
           )}
         </Sheet>
+      )}
+      {favoriteEditor && (
+        <FavoriteEditor
+          favorite={favoriteEditor === true ? undefined : favoriteEditor}
+          onClose={() => setFavoriteEditor(null)}
+        />
       )}
       {categoryEditor && (
         <Sheet

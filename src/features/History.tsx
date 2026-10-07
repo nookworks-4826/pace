@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Coffee,
@@ -13,7 +13,9 @@ import {
 } from "lucide-react";
 import { usePace } from "../app/context";
 import { Empty, Field, yen } from "../components/UI";
-import { deleteExpense, saveExpense } from "../db";
+import { withUndo, undoChange } from "../domain/undo";
+import { deleteExpense } from "../db";
+import { searchExpenses } from "../domain/smartSearch";
 import { dateKey, monthEnd } from "../domain/dates";
 import { paymentLabels } from "../types";
 import type { Expense } from "../types";
@@ -110,10 +112,10 @@ export function ExpenseRow({
                 )
               )
                 void run(async () => {
-                  await deleteExpense(expense.id);
-                  toast("支出を削除しました", async () => {
-                    await saveExpense(expense);
-                  });
+                  const undo = await withUndo("支出を削除", () =>
+                    deleteExpense(expense.id),
+                  );
+                  toast("支出を削除しました", () => undoChange(undo.id));
                 });
             }}
           >
@@ -125,8 +127,17 @@ export function ExpenseRow({
   );
 }
 export function History() {
-  const { data, today, openExpense } = usePace();
-  const [params] = useSearchParams();
+  const { data, today, openExpense, historyFilters } = usePace();
+  const [legacyParams, setLegacyParams] = useSearchParams();
+  const params = new URLSearchParams({
+    ...Object.fromEntries(legacyParams),
+    ...Object.fromEntries(
+      Object.entries(historyFilters).filter(([, v]) => v !== undefined),
+    ),
+  });
+  useEffect(() => {
+    if (legacyParams.size) setLegacyParams({}, { replace: true });
+  }, []);
   const queryMonth = /^\d{4}-(0[1-9]|1[0-2])$/.test(params.get("month") ?? "")
     ? params.get("month")
     : null;
@@ -147,7 +158,7 @@ export function History() {
   const [limit, setLimit] = useState(60);
   const filtered = useMemo(
     () =>
-      data.expenses
+      searchExpenses(data, search, today)
         .filter((e) => {
           const c = data.categories.find((c) => c.id === e.categoryId);
           const corpus = [
@@ -165,8 +176,7 @@ export function History() {
             .normalize("NFKC")
             .toLowerCase();
           return (
-            (!search ||
-              corpus.includes(search.normalize("NFKC").toLowerCase())) &&
+            Boolean(corpus) &&
             (!category || e.categoryId === category) &&
             (!card || e.creditCardId === card) &&
             (!method || e.paymentMethod === method) &&
@@ -182,7 +192,7 @@ export function History() {
             b.date.localeCompare(a.date) ||
             b.createdAt.localeCompare(a.createdAt),
         ),
-    [data, search, category, card, method, account, from, to, min, max],
+    [data, today, search, category, card, method, account, from, to, min, max],
   );
   const visible = filtered.slice(0, limit);
   const filteredIds = new Set(filtered.map((row) => row.id));
@@ -222,7 +232,7 @@ export function History() {
         <Search size={20} />
         <input
           aria-label="履歴を検索"
-          placeholder="店名・金額・口座・メモ"
+          placeholder="先月の外食・Suicaで使ったもの"
           value={search}
           onChange={(e) => {
             setSearch(e.target.value);

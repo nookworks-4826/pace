@@ -1,3 +1,7 @@
+import { withUndo, undoChange } from "../domain/undo";
+import { verificationDays, verificationChoices } from "../domain/practical";
+import type { VerificationDays } from "../types";
+import { BalanceCheck } from "./BalanceCheck";
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
@@ -90,26 +94,45 @@ function AccountEditor({
             snapshotBalance: balance,
             balanceAsOf: today,
             snapshotRecordedAt: now,
+            lastVerifiedAt: now,
             balanceSource: "manual",
             creditCardId: cardId,
             isSpendable: kind !== "CREDIT_CARD" && f.get("spendable") === "on",
+            verificationDays: Number(
+              f.get("verificationDays"),
+            ) as VerificationDays,
             isActive: true,
             automationLevel: "manual",
             updatedAt: now,
           };
-          await enableAccountManagement();
-          await db.transaction(
-            "rw",
-            db.accounts,
-            db.accountAdjustments,
-            async () => {
-              if (account)
-                await reconcileAccount(account, balance, today, "残高を確認");
-              await db.accounts.put(row);
-            },
-          );
+          const undo = await withUndo("口座の残高を保存", async () => {
+            await enableAccountManagement();
+            return db.transaction(
+              "rw",
+              db.accounts,
+              db.accountAdjustments,
+              async () => {
+                if (account) {
+                  const current = await db.accounts.get(account.id);
+                  if (
+                    !current ||
+                    current.updatedAt !== account.updatedAt ||
+                    current.snapshotRecordedAt !== account.snapshotRecordedAt ||
+                    current.archivedAt !== account.archivedAt ||
+                    current.lastVerifiedAt !== account.lastVerifiedAt
+                  ) {
+                    throw new Error(
+                      "別の画面で口座が変更されました。開き直して確認してください。",
+                    );
+                  }
+                  await reconcileAccount(current, balance, today, "残高を確認");
+                }
+                await db.accounts.put(row);
+              },
+            );
+          });
           onClose();
-          toast("残高を保存しました");
+          toast("残高を保存しました", () => undoChange(undo.id));
         }}
       >
         <Field label="名前">
@@ -170,6 +193,24 @@ function AccountEditor({
             }
           />
         </Field>
+        <Field label="残高確認の間隔">
+          <select
+            name="verificationDays"
+            defaultValue={
+              account
+                ? verificationDays(account)
+                : kind === "CASH" || kind === "EWALLET"
+                  ? 3
+                  : 7
+            }
+          >
+            {verificationChoices.map((n) => (
+              <option key={n} value={n}>
+                {n ? `${n}日` : "OFF"}
+              </option>
+            ))}
+          </select>
+        </Field>
         {kind !== "CREDIT_CARD" && (
           <label className="check-field">
             <input
@@ -179,6 +220,11 @@ function AccountEditor({
             />
             今使えるお金に含める
           </label>
+        )}
+        {account && (
+          <p className="hint">
+            差額を支出・収入として整理したいときは「残高をまとめて確認」を使ってください。この画面では確認した残高だけを保存します。
+          </p>
         )}
         {account?.balanceSource === "provider" && (
           <p className="hint">
@@ -236,14 +282,23 @@ function AccountEditor({
             className="text-button danger"
             onClick={() =>
               void run(async () => {
-                if (!confirm("残高の集計から外しますか？記録は残ります。"))
+                if (
+                  !confirm(
+                    "この口座を入力候補から外しますか？過去の記録と残高の集計は残ります。",
+                  )
+                )
                   return;
-                await db.accounts.update(account.id, { isActive: false });
+                const undo = await withUndo("口座をアーカイブ", async () => {
+                  await db.accounts.update(account.id, {
+                    archivedAt: new Date().toISOString(),
+                  });
+                });
+                toast("入力候補から外しました", () => undoChange(undo.id));
                 onClose();
               })
             }
           >
-            この口座を集計から外す
+            使わなくなった口座をアーカイブ
           </button>
         )}
       </AsyncForm>
@@ -264,7 +319,9 @@ export function TransferEditor({
   externalIds?: string[];
 }) {
   const { data, today, toast } = usePace();
-  const accounts = (data.accounts ?? []).filter((a) => a.isActive);
+  const accounts = (data.accounts ?? []).filter(
+    (a) => a.isActive && !a.archivedAt,
+  );
   const [from, setFrom] = useState(
     initialFrom ?? accounts.find((a) => a.id !== initialTo)?.id ?? "",
   );
@@ -322,23 +379,25 @@ export function TransferEditor({
                 ? ("snapshot" as const)
                 : ("ledger" as const),
           };
-          await db.transaction(
-            "rw",
-            db.transfers,
-            db.financialAudits,
-            db.externalTransactions,
-            async () => {
-              await saveTransfer(transfer);
-              for (const id of externalIds ?? [])
-                await db.externalTransactions.update(id, {
-                  kind: "transfer",
-                  linkedRecordId: transfer.id,
-                });
-            },
+          const undo = await withUndo("振替を記録", () =>
+            db.transaction(
+              "rw",
+              db.transfers,
+              db.financialAudits,
+              db.externalTransactions,
+              async () => {
+                await saveTransfer(transfer);
+                for (const id of externalIds ?? [])
+                  await db.externalTransactions.update(id, {
+                    kind: "transfer",
+                    linkedRecordId: transfer.id,
+                  });
+              },
+            ),
           );
           onClose();
           toast("振替を記録しました · 支出には含めません", () =>
-            reverseTransfer(transfer.id),
+            undoChange(undo.id),
           );
         }}
       >
@@ -424,11 +483,13 @@ export function TransferEditor({
   );
 }
 export function Money() {
-  const { data, finance, today, run } = usePace();
+  const { data, finance, today, run, toast } = usePace();
+  const [verify, setVerify] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const [edit, setEdit] = useState<Account | true | null>(null);
   useEffect(() => {
     if (searchParams.get("add") === "account") setEdit(true);
+    if (searchParams.get("verify") === "1") setVerify(true);
   }, [searchParams]);
   const closeAccountEditor = () => {
     setEdit(null);
@@ -534,43 +595,91 @@ export function Money() {
               <span>→</span>
             </button>
           ))}
-          <div className="account-grid">
-            {balances
-              .filter((b) => b.account.isActive)
-              .map((b) => (
-                <button
-                  key={b.account.id}
-                  className="surface account-card"
-                  onClick={() => setEdit(b.account)}
-                >
-                  <span className="account-icon">
-                    {b.isLiability ? (
-                      <CreditCard />
-                    ) : b.account.kind === "BANK" ? (
-                      <Landmark />
-                    ) : (
-                      <Wallet />
-                    )}
-                  </span>
-                  <b>{b.account.name}</b>
-                  <small>
-                    {kindLabels[b.account.kind]} ·{" "}
-                    {b.account.balanceSource === "provider"
-                      ? "保存済みの残高"
-                      : "手入力"}
-                  </small>
+          <button
+            className="button button-secondary full"
+            onClick={() => setVerify(true)}
+          >
+            残高をまとめて確認
+          </button>
+          {(Object.keys(kindLabels) as AccountKind[])
+            .filter((kind) =>
+              balances.some(
+                (b) =>
+                  b.account.isActive &&
+                  !b.account.archivedAt &&
+                  b.account.kind === kind,
+              ),
+            )
+            .map((kind) => (
+              <details className="money-account-group surface" open key={kind}>
+                <summary className="account-group-summary">
+                  <b>{kindLabels[kind]}</b>
                   <strong>
-                    {b.balance === null ? "未確認" : yen(b.balance)}
+                    {yen(
+                      balances
+                        .filter(
+                          (b) =>
+                            b.account.isActive &&
+                            !b.account.archivedAt &&
+                            b.account.kind === kind,
+                        )
+                        .reduce((sum, b) => sum + (b.balance ?? 0), 0),
+                    )}
+                    {balances.some(
+                      (b) =>
+                        b.account.isActive &&
+                        !b.account.archivedAt &&
+                        b.account.kind === kind &&
+                        b.balance === null,
+                    )
+                      ? " · 未確認あり"
+                      : ""}
                   </strong>
-                  <small>
-                    {b.isStale ? "24時間以上前 · " : ""}
-                    {b.lastUpdatedAt?.slice(0, 16).replace("T", " ") ??
-                      "確認日時なし"}
-                  </small>
-                  <Pencil size={14} />
-                </button>
-              ))}
-          </div>
+                </summary>
+                <div className="account-grid">
+                  {balances
+                    .filter(
+                      (b) =>
+                        b.account.isActive &&
+                        !b.account.archivedAt &&
+                        b.account.kind === kind,
+                    )
+                    .map((b) => (
+                      <button
+                        key={b.account.id}
+                        className="surface account-card"
+                        onClick={() => setEdit(b.account)}
+                      >
+                        <span className="account-icon">
+                          {b.isLiability ? (
+                            <CreditCard />
+                          ) : b.account.kind === "BANK" ? (
+                            <Landmark />
+                          ) : (
+                            <Wallet />
+                          )}
+                        </span>
+                        <b>{b.account.name}</b>
+                        <small>
+                          {kindLabels[b.account.kind]} ·{" "}
+                          {b.account.balanceSource === "provider"
+                            ? "保存済みの残高"
+                            : "手入力"}
+                        </small>
+                        <strong>
+                          {b.balance === null ? "未確認" : yen(b.balance)}
+                        </strong>
+                        <small>
+                          {b.isStale ? "確認推奨 · " : ""}
+                          {b.lastUpdatedAt?.slice(0, 16).replace("T", " ") ??
+                            "確認日時なし"}
+                        </small>
+                        <Pencil size={14} />
+                      </button>
+                    ))}
+                </div>
+              </details>
+            ))}
           <button
             className="button button-secondary"
             onClick={() => {
@@ -612,6 +721,39 @@ export function Money() {
             <b>口座・カードの管理</b>
             <span>→</span>
           </Link>
+          <details className="surface">
+            <summary>アーカイブ済みの口座</summary>
+            {(data.accounts ?? [])
+              .filter((a) => a.archivedAt)
+              .map((a) => (
+                <div className="list-row" key={a.id}>
+                  <span>{a.name}</span>
+                  <button
+                    className="text-button"
+                    onClick={() =>
+                      void run(async () => {
+                        const undo = await withUndo(
+                          "口座を再表示",
+                          async () => {
+                            await db.accounts.update(a.id, {
+                              archivedAt: undefined,
+                            });
+                          },
+                        );
+                        toast("入力候補に戻しました", () =>
+                          undoChange(undo.id),
+                        );
+                      })
+                    }
+                  >
+                    再表示
+                  </button>
+                </div>
+              ))}
+            <p className="hint">
+              過去の記録と残高を残し、新しい入力候補だけから外します。
+            </p>
+          </details>
           <FinancialInbox />
           <section className="surface">
             <h2>振替の履歴</h2>
@@ -676,6 +818,16 @@ export function Money() {
             <Link to="/history">支出の履歴を確認 →</Link>
           </section>
         </>
+      )}
+      {verify && (
+        <BalanceCheck
+          onClose={() => {
+            setVerify(false);
+            const next = new URLSearchParams(searchParams);
+            next.delete("verify");
+            setSearchParams(next, { replace: true });
+          }}
+        />
       )}
       {edit && (
         <AccountEditor
