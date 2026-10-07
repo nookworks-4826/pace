@@ -1,3 +1,5 @@
+import { reviewReasons } from "../domain/practical";
+import type { ExpenseInbox } from "../types";
 import Dexie, { type Table } from "dexie";
 import type {
   AppData,
@@ -42,7 +44,9 @@ import { dateKey, dateOnDay, monthKey, todayJST } from "../domain/dates";
 import { learnMerchantRule, normalizeMerchant } from "../domain/categorization";
 import { validateData } from "../domain/backup/schema";
 
+import { APP_VERSION } from "../types";
 export const defaultSettings: AppSettings = {
+  practical: { welcomedVersion: APP_VERSION, preparedVersion: APP_VERSION },
   id: "main",
   openingLiquidBalance: null,
   salarySchedule: null,
@@ -144,6 +148,7 @@ export const defaultCategories: Category[] = categorySeed.map(
 );
 
 export class PaceDatabase extends Dexie {
+  expenseInbox!: Table<ExpenseInbox, string>;
   accounts!: Table<Account, string>;
   transfers!: Table<Transfer, string>;
   financialConnections!: Table<FinancialConnection, string>;
@@ -215,6 +220,7 @@ export class PaceDatabase extends Dexie {
       providerCredentials: "id",
       vaultMeta: "id",
     });
+    this.version(4).stores({ expenseInbox: "id,expenseId" });
     installVaultMiddleware(this, this.vaultSession);
     this.installValidation();
   }
@@ -409,22 +415,91 @@ export const db = new PaceDatabase();
 let initialization: Promise<void> | undefined;
 export function initializeDb(): Promise<void> {
   if (!initialization)
-    initialization = db
-      .transaction("rw", [db.settings, db.categories], async () => {
-        if (!(await db.settings.get("main")))
-          await db.settings.add(structuredClone(defaultSettings));
-        if ((await db.categories.count()) === 0)
-          await db.categories.bulkAdd(structuredClone(defaultCategories));
-      })
-      .catch((error: unknown) => {
-        initialization = undefined;
-        throw error;
-      });
+    initialization = inspectAndPrepare().catch((error: unknown) => {
+      db.vaultSession.readOnly = true;
+      initialization = undefined;
+      throw error;
+    });
   return initialization;
 }
-export async function readAppData(): Promise<AppData> {
+async function inspectAndPrepare() {
+  const { settings, data: existing } = await inspectStoredData();
+  if (!settings) {
+    const counts = await Promise.all(
+      db.tables.filter((t) => t.name !== "vaultMeta").map((t) => t.count()),
+    );
+    if (counts.some((n) => n > 0))
+      throw new Error(
+        "設定の記録を確認できません。データを変更せず保護しています。",
+      );
+    db.vaultSession.readOnly = false;
+    await db.transaction("rw", [db.settings, db.categories], async () => {
+      await db.settings.add(structuredClone(defaultSettings));
+      await db.categories.bulkAdd(structuredClone(defaultCategories));
+    });
+    return;
+  }
+  db.vaultSession.readOnly = false;
+  if (settings.practical?.preparedVersion !== APP_VERSION)
+    await db.transaction("rw", [db.settings, db.expenseInbox], async () => {
+      for (const e of existing!.expenses) {
+        const reasons = reviewReasons(e);
+        if (reasons.length)
+          await db.expenseInbox.put({ id: e.id, expenseId: e.id, reasons });
+      }
+      await db.settings.put({
+        ...settings,
+        notificationCenter:
+          settings.notificationCenter &&
+          settings.notificationCenter.intensity === undefined
+            ? {
+                ...settings.notificationCenter,
+                intensity: "standard",
+                rules: Object.fromEntries(
+                  Object.entries(settings.notificationCenter.rules).map(
+                    ([kind, rule]) => [
+                      kind,
+                      { ...rule, explicitlyConfigured: true },
+                    ],
+                  ),
+                ) as NonNullable<AppSettings["notificationCenter"]>["rules"],
+              }
+            : settings.notificationCenter,
+        practical: { ...settings.practical, preparedVersion: APP_VERSION },
+      });
+    });
+}
+export async function inspectStoredData(database: PaceDatabase = db) {
+  try {
+    return await database.transaction("r", database.tables, async () => {
+      const settings = await database.settings.get("main");
+      await database.drafts.toArray();
+      await database.providerCredentials.toArray();
+      await database.vaultMeta.toArray();
+      const data = await readAppData(true, database);
+      if (!settings) {
+        const counts = await Promise.all(
+          database.tables
+            .filter((t) => t.name !== "vaultMeta")
+            .map((t) => t.count()),
+        );
+        if (counts.some((n) => n > 0))
+          throw new Error("設定の記録を確認できません。");
+        return { settings, data: null };
+      }
+      return { settings, data: validateData(data) };
+    });
+  } catch (error) {
+    database.vaultSession.readOnly = true;
+    throw error;
+  }
+}
+export async function readAppData(
+  includeImages = true,
+  database: PaceDatabase = db,
+): Promise<AppData> {
   // A read transaction gives finance one coherent snapshot while writes are in flight.
-  return db.transaction("r", db.tables, async () => {
+  return database.transaction("r", database.tables, async () => {
     const [
       expenses,
       incomes,
@@ -444,6 +519,7 @@ export async function readAppData(): Promise<AppData> {
       dailyCheckIns,
       favorites,
       accounts,
+      expenseInbox,
       transfers,
       financialConnections,
       externalTransactions,
@@ -453,32 +529,33 @@ export async function readAppData(): Promise<AppData> {
       financialAudits,
       accountAdjustments,
     ] = await Promise.all([
-      db.expenses.toArray(),
-      db.incomes.toArray(),
-      db.cards.toArray(),
-      db.cardPayments.toArray(),
-      db.debts.toArray(),
-      db.repayments.toArray(),
-      db.recurringExpenses.toArray(),
-      db.recurringOccurrences.toArray(),
-      db.savingsGoals.toArray(),
-      db.savingsContributions.toArray(),
-      db.budgets.toArray(),
-      db.settings.get("main"),
-      db.merchantRules.toArray(),
-      db.categories.toArray(),
-      db.balanceAdjustments.toArray(),
-      db.dailyCheckIns.toArray(),
-      db.favorites.toArray(),
-      db.accounts.toArray(),
-      db.transfers.toArray(),
-      db.financialConnections.toArray(),
-      db.externalTransactions.toArray(),
-      db.syncStates.toArray(),
-      db.receipts.toArray(),
-      db.salaryRules.toArray(),
-      db.financialAudits.toArray(),
-      db.accountAdjustments.toArray(),
+      database.expenses.toArray(),
+      database.incomes.toArray(),
+      database.cards.toArray(),
+      database.cardPayments.toArray(),
+      database.debts.toArray(),
+      database.repayments.toArray(),
+      database.recurringExpenses.toArray(),
+      database.recurringOccurrences.toArray(),
+      database.savingsGoals.toArray(),
+      database.savingsContributions.toArray(),
+      database.budgets.toArray(),
+      database.settings.get("main"),
+      database.merchantRules.toArray(),
+      database.categories.toArray(),
+      database.balanceAdjustments.toArray(),
+      database.dailyCheckIns.toArray(),
+      database.favorites.toArray(),
+      database.accounts.toArray(),
+      database.expenseInbox.toArray(),
+      database.transfers.toArray(),
+      database.financialConnections.toArray(),
+      database.externalTransactions.toArray(),
+      database.syncStates.toArray(),
+      includeImages ? database.receipts.toArray() : Promise.resolve([]),
+      database.salaryRules.toArray(),
+      database.financialAudits.toArray(),
+      database.accountAdjustments.toArray(),
     ]);
     return {
       expenses,
@@ -499,6 +576,7 @@ export async function readAppData(): Promise<AppData> {
       dailyCheckIns,
       favorites,
       accounts,
+      expenseInbox,
       transfers,
       financialConnections,
       externalTransactions,
@@ -560,6 +638,7 @@ export async function saveExpense(expense: Expense): Promise<void> {
       db.recurringExpenses,
       db.receipts,
       db.externalTransactions,
+      db.expenseInbox,
     ],
     async () => {
       const category = await db.categories.get(expense.categoryId);
@@ -609,6 +688,14 @@ export async function saveExpense(expense: Expense): Promise<void> {
         });
       }
       await db.expenses.put(expense);
+      const reasons = reviewReasons(expense);
+      if (reasons.length)
+        await db.expenseInbox.put({
+          id: expense.id,
+          expenseId: expense.id,
+          reasons,
+        });
+      else await db.expenseInbox.delete(expense.id);
       if (expense.receiptId) {
         const receipt = await db.receipts.get(expense.receiptId);
         if (!receipt)
@@ -642,7 +729,7 @@ export async function saveExpense(expense: Expense): Promise<void> {
         expense.subcategoryId,
         normalized ? await db.merchantRules.get(normalized) : undefined,
       );
-      if (rule) await db.merchantRules.put(rule);
+      if (rule && expense.merchant !== "支出") await db.merchantRules.put(rule);
     },
   );
 }
@@ -654,11 +741,13 @@ export async function deleteExpense(id: string): Promise<Expense | undefined> {
       db.recurringOccurrences,
       db.receipts,
       db.externalTransactions,
+      db.expenseInbox,
     ],
     async () => {
       const expense = await db.expenses.get(id);
       if (!expense) return undefined;
       await db.expenses.delete(id);
+      await db.expenseInbox.delete(id);
       if (expense.recurringOccurrenceId)
         await db.recurringOccurrences.delete(expense.recurringOccurrenceId);
       const receipts = await db.receipts
@@ -754,12 +843,31 @@ export async function restoreAppData(data: AppData): Promise<void> {
       await db.savingsGoals.bulkAdd(data.savingsGoals);
       await db.savingsContributions.bulkAdd(data.savingsContributions);
       await db.budgets.bulkAdd(data.budgets);
-      await db.settings.add({ ...data.settings, id: "main" });
+      const restoredSettings = structuredClone(data.settings);
+      const health = restoredSettings.practical?.backupHealth;
+      // A confirmation from another device does not verify this device's saved file.
+      if (health?.status === "normal") {
+        restoredSettings.practical!.backupHealth = {
+          ...health,
+          status: "review",
+          savedConfirmed: false,
+        };
+      }
+      await db.settings.add({ ...restoredSettings, id: "main" });
       await db.merchantRules.bulkAdd(data.merchantRules);
       await db.categories.bulkAdd(data.categories);
       await db.balanceAdjustments.bulkAdd(data.balanceAdjustments);
       await db.dailyCheckIns.bulkAdd(data.dailyCheckIns);
       await db.favorites.bulkAdd(data.favorites);
+      await db.expenseInbox.bulkAdd(
+        data.expenseInbox ??
+          data.expenses.flatMap((e) => {
+            const reasons = reviewReasons(e);
+            return reasons.length
+              ? [{ id: e.id, expenseId: e.id, reasons }]
+              : [];
+          }),
+      );
       await db.accounts.bulkAdd(data.accounts ?? []);
       await db.transfers.bulkAdd(data.transfers ?? []);
       // A restored backup retains records but never grants provider authorization.
