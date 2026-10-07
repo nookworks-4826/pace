@@ -1,6 +1,6 @@
 {
   "name": "pace-local-finance",
-  "version": "2.1.1",
+  "version": "2.2.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,6 +8,8 @@
     "build": "node scripts/prepare-ocr.mjs && tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run",
+    "test:experience": "node scripts/qa-experience.mjs && node scripts/qa-practical.mjs",
+    "test:security": "vitest run src/tests/security.test.ts src/tests/vault.test.ts src/tests/backup.test.ts src/tests/db.test.ts",
     "test:watch": "vitest",
     "typecheck": "tsc -b",
     "test:ui": "node scripts/qa-ui-suite.mjs",
@@ -20,7 +22,9 @@
     "test:passkeys": "node scripts/qa-passkeys.mjs",
     "test:refresh": "node scripts/qa-refresh.mjs",
     "icons": "node scripts/render-icons.mjs",
-    "privacy:audit": "node scripts/privacy-audit.mjs"
+    "privacy:audit": "node scripts/privacy-audit.mjs",
+    "test:preservation": "node scripts/qa-preservation.mjs",
+    "test:practical": "vitest run src/tests/practical.test.ts && node scripts/qa-practical.mjs"
   },
   "dependencies": {
     "date-fns": "4.4.0",

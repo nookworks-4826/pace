@@ -19,8 +19,8 @@ export default defineConfig({
         scope: "./",
         display: "standalone",
         orientation: "portrait-primary",
-        theme_color: "#ffdf79",
-        background_color: "#fafbf8",
+        theme_color: "#285dd7",
+        background_color: "#f7f9fd",
         icons: [
           {
             src: "icon-sunny-192.png",
@@ -48,7 +48,7 @@ export default defineConfig({
         runtimeCaching: [{
           urlPattern: ({url})=>url.origin===self.location.origin && /\/ocr\/(worker\.min\.js|tesseract-core-(?:relaxedsimd-|simd-)?lstm\.wasm\.js|(?:jpn|eng)\.traineddata\.gz)$/.test(url.pathname),
           handler:'CacheFirst',
-          options:{cacheName:'pace-ocr-static-v7',expiration:{maxEntries:6},cacheableResponse:{statuses:[200]}},
+          options:{cacheName:'pace-ocr-static-v7-2.2.0',expiration:{maxEntries:6},cacheableResponse:{statuses:[200]}},
         }],
         globPatterns: ["**/*.{js,css,html,png,svg,woff2}"],
         maximumFileSizeToCacheInBytes: 5_000_000,
