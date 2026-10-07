@@ -109,7 +109,7 @@ try {
     assert.ok(file.length > 0);
     if (extension === ".json") {
       const data = JSON.parse(file.toString("utf8"));
-      assert.equal(data.schemaVersion, 2);
+      assert.equal(data.schemaVersion, 3);
       assert.equal(data.data.expenses[0].merchant, "Fictional export cafe");
       assert.ok(!file.includes(Buffer.from("providerCredentials")));
       await page.evaluate(async (text) => {
@@ -143,7 +143,7 @@ try {
         passed: true,
         browser: "Chromium",
         exports: summaries,
-        schema2JsonRoundTrip: true,
+        schema3JsonRoundTrip: true,
         excelSheets: 12,
         numericAmountRetained: true,
         formulaCellsAreText: true,
@@ -157,7 +157,7 @@ try {
     ),
   );
   console.log(
-    "Export QA passed: JSON, CSV and Excel downloads; schema 2 restore; 12 Excel sheets; no external requests.",
+    "Export QA passed: JSON, CSV and Excel downloads; schema 3 restore; 12 Excel sheets; no external requests.",
   );
   await context.close();
 } finally {
