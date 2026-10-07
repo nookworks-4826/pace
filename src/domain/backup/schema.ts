@@ -3,6 +3,17 @@ import { APP_VERSION, SCHEMA_VERSION, type AppData } from "../../types";
 import { MAX_MONEY } from "../finance";
 import { dateKey, isDateKey, monthKey } from "../dates";
 
+const quickAction = z.enum([
+  "expense",
+  "receipt",
+  "transfer",
+  "balance",
+  "income",
+  "history",
+  "fixed",
+  "inbox",
+]);
+const reviewReason = z.enum(["merchant", "category", "ocr", "payment"]);
 const text = z.string().max(10_000);
 const id = z.string().min(1).max(300);
 const money = z.number().int().min(0).max(MAX_MONEY);
@@ -52,6 +63,30 @@ const entries = <T extends z.ZodType>(schema: T) =>
 const settings = z
   .object({
     id: z.literal("main"),
+    practical: z
+      .object({
+        preparedVersion: z.string().max(30).optional(),
+        welcomedVersion: z.string().max(100).optional(),
+        backupHealth: z
+          .object({
+            status: z.enum(["normal", "review", "failed"]),
+            checkedAt: date,
+            encrypted: z.boolean(),
+            schemaVersion: z.number().int().min(1).max(4),
+            bytes: z.number().int().min(0).max(100000000),
+            savedConfirmed: z.boolean(),
+          })
+          .strict()
+          .refine(
+            (value) =>
+              value.status !== "normal" ||
+              (value.encrypted && value.savedConfirmed && value.bytes > 0),
+            "A normal backup must be encrypted and its saved file confirmed",
+          )
+          .optional(),
+      })
+      .strict()
+      .optional(),
     openingLiquidBalance: money.nullable(),
     salarySchedule: z
       .object({
@@ -61,7 +96,14 @@ const settings = z
       })
       .strict()
       .nullable(),
-    theme: z.enum(["default", "midnight", "forest", "mono"]),
+    theme: z.enum([
+      "default",
+      "softWhite",
+      "glassLight",
+      "midnight",
+      "forest",
+      "mono",
+    ]),
     colorMode: z.enum(["system", "light", "dark"]),
     onboardingCompleted: z.boolean(),
     setupReviewed: z.array(z.string().max(100)).max(100),
@@ -92,12 +134,107 @@ const settings = z
       })
       .strict()
       .optional(),
+    personalization: z
+      .object({
+        enabled: z.boolean(),
+        quickActions: z
+          .array(quickAction)
+          .min(1)
+          .max(5)
+          .refine((x) => new Set(x).size === x.length)
+          .optional(),
+        pinnedQuickActions: z
+          .array(quickAction)
+          .max(5)
+          .refine((x) => new Set(x).size === x.length)
+          .optional(),
+        pinnedCards: z
+          .array(z.enum(["balances", "insight", "recent"]))
+          .max(3)
+          .refine((x) => new Set(x).size === x.length),
+        homeCardOrder: z
+          .array(z.enum(["balances", "insight", "recent"]))
+          .length(3)
+          .refine((x) => new Set(x).size === 3)
+          .optional(),
+        featureUses: z.record(
+          z.string().max(50),
+          z.number().int().min(0).max(10000),
+        ),
+      })
+      .strict()
+      .optional(),
+    appearance: z
+      .object({
+        accent: z.enum([
+          "blue",
+          "sky",
+          "indigo",
+          "teal",
+          "green",
+          "graphite",
+          "purple",
+          "orange",
+        ]),
+        background: z.enum(["flat", "tint", "gradient", "glass", "glow"]),
+        cards: z.enum(["standard", "soft", "glass", "flat"]),
+        density: z.enum(["compact", "standard", "comfortable"]),
+      })
+      .strict()
+      .optional(),
+    notificationCenter: z
+      .object({
+        intensity: z.enum(["quiet", "standard", "active"]).optional(),
+        quietEnabled: z.boolean(),
+        quietStart: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+        quietEnd: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+        rules: z.record(
+          z.enum([
+            "daily",
+            "evening",
+            "balance",
+            "payday",
+            "card",
+            "recurring",
+            "budget",
+            "low",
+            "backup",
+          ]),
+          z
+            .object({
+              explicitlyConfigured: z.boolean().optional(),
+              enabled: z.boolean(),
+              time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+              days: z.array(z.number().int().min(0).max(6)).max(7),
+              frequency: z.enum(["daily", "weekly", "monthly"]),
+              monthDay: z.number().int().min(1).max(31),
+              snoozeMinutes: z.number().int().min(5).max(1440),
+              snoozedUntil: date.optional(),
+              showAmount: z.boolean(),
+              badge: z.boolean(),
+              lastAcknowledged: z.string().max(60).optional(),
+              lastDelivered: z.string().max(60).optional(),
+            })
+            .strict(),
+        ),
+      })
+      .strict()
+      .optional(),
     saveReceiptImages: z.boolean().optional(),
   })
   .strict();
 
 export const appDataSchema = z
   .object({
+    expenseInbox: entries(
+      z
+        .object({
+          id,
+          expenseId: id,
+          reasons: z.array(reviewReason).min(1).max(4),
+        })
+        .strict(),
+    ).optional(),
     expenses: entries(
       z
         .object({
@@ -112,6 +249,10 @@ export const appDataSchema = z
           ...externalMetadata,
           paymentChannel,
           receiptId: id.optional(),
+          reviewed: z.boolean().optional(),
+          ocrNeedsReview: z.boolean().optional(),
+          paymentNeedsReview: z.boolean().optional(),
+          inputOrigin: z.enum(["manual", "receipt"]).optional(),
           externalMergedFromManual: z.boolean().optional(),
           memo: text,
           isFixedCost: z.boolean(),
@@ -309,7 +450,8 @@ export const appDataSchema = z
         .object({
           id,
           name: text,
-          amount: positive,
+          amount: money,
+          memo: text.optional(),
           merchant: text,
           ...category,
           ...payment,
@@ -336,6 +478,18 @@ export const appDataSchema = z
           snapshotBalance: signedMoney.nullable(),
           balanceAsOf: optionalDate,
           snapshotRecordedAt: optionalDate,
+          lastVerifiedAt: date.optional(),
+          archivedAt: date.optional(),
+          verificationDays: z
+            .union([
+              z.literal(0),
+              z.literal(1),
+              z.literal(3),
+              z.literal(7),
+              z.literal(14),
+              z.literal(30),
+            ])
+            .optional(),
           balanceSource: z.enum(["manual", "provider"]),
           creditCardId: id.optional(),
           providerId: providerId.optional(),
@@ -484,11 +638,21 @@ export const appDataSchema = z
 
 const backupSchema = z
   .object({
-    schemaVersion: z.union([z.literal(1), z.literal(2)]),
+    schemaVersion: z.union([
+      z.literal(1),
+      z.literal(2),
+      z.literal(3),
+      z.literal(4),
+    ]),
     metadata: z
       .object({
         appVersion: z.string().min(1).max(100),
-        schemaVersion: z.union([z.literal(1), z.literal(2)]),
+        schemaVersion: z.union([
+          z.literal(1),
+          z.literal(2),
+          z.literal(3),
+          z.literal(4),
+        ]),
         exportedAt: date,
       })
       .strict(),
@@ -686,6 +850,8 @@ export function validateData(value: unknown): AppData {
     )
       fail();
   }
+  for (const row of data.expenseInbox ?? [])
+    if (!expenses.has(row.expenseId) || row.id !== row.expenseId) fail();
   for (const row of data.cardPayments) if (!cards.has(row.creditCardId)) fail();
   for (const row of data.repayments) if (!debts.has(row.debtId)) fail();
   for (const row of data.savingsContributions)
