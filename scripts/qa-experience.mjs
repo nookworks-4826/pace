@@ -704,8 +704,9 @@ try {
   );
   await page.evaluate(async () => {
     const { db } = await import("/src/db/index.ts");
+    const { todayJST } = await import("/src/domain/dates.ts");
     const now = new Date().toISOString(),
-      date = now.slice(0, 10);
+      date = todayJST();
     await db.expenses.put({
       id: "fictional-shortage",
       createdAt: now,
@@ -741,8 +742,9 @@ try {
   record("Empty history has a clear state and no layout overflow");
   await page.evaluate(async () => {
     const { db } = await import("/src/db/index.ts");
+    const { todayJST } = await import("/src/domain/dates.ts");
     const now = new Date().toISOString(),
-      date = now.slice(0, 10);
+      date = todayJST();
     await db.expenses.bulkPut(
       Array.from({ length: 1000 }, (_, i) => ({
         id: "fictional-volume-" + i,

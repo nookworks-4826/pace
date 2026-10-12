@@ -1,0 +1,44 @@
+name: Pace cloud development readiness
+
+on:
+  push:
+    branches: [cloud/pace-development-20261012]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  development:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Check shell syntax
+        run: |
+          for script in scripts/codex-cloud-{setup,start,check}.sh; do
+            bash -n "$script"
+          done
+      - name: Install development tools
+        run: bash scripts/codex-cloud-setup.sh
+      - name: Run existing checks with fictional fixtures
+        run: bash scripts/codex-cloud-check.sh
+      - name: Confirm development server readiness
+        shell: bash
+        run: |
+          bash scripts/codex-cloud-start.sh > "$RUNNER_TEMP/pace-dev.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:5173/ > "$RUNNER_TEMP/pace-index.html"; then
+              test -s "$RUNNER_TEMP/pace-index.html"
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/pace-dev.log"
+          exit 1
